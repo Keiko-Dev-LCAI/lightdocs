@@ -34,8 +34,8 @@
     line-height: 1.45;
   }
   body {
-    padding: 12px 24px;
-    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    padding: 8px 24px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
   }
   .shell {
     width: min(1700px, 96vw);
@@ -43,20 +43,29 @@
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
   }
   .privacy, .draft-warn {
     background: rgba(91, 75, 255, 0.12);
     border: 1px solid rgba(91, 75, 255, 0.35);
     color: var(--text2);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
-    padding: 8px 12px;
-    border-radius: 10px;
-    line-height: 1.4;
+    padding: 6px 10px;
+    border-radius: 8px;
+    line-height: 1.35;
   }
+  .privacy.slim {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    white-space: normal;
+  }
+  .privacy.slim .terms-link {
+    font-size: 12px; color: #CCCEEF; text-decoration: none; white-space: nowrap;
+    min-height: 32px; display: inline-flex; align-items: center;
+  }
+  .privacy.slim .terms-link:hover { text-decoration: underline; }
   .draft-warn { background: rgba(221, 0, 172, 0.1); border-color: rgba(221, 0, 172, 0.35); }
-  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
   header { display: flex; align-items: center; gap: 12px; }
   .mark {
     width: 44px; height: 44px; border-radius: 12px; background: var(--lc-primary); color: #fff;
@@ -74,9 +83,9 @@
       grid-template-columns: minmax(260px, 300px) minmax(0, 1.15fr) minmax(0, 1.15fr);
       gap: 14px;
       align-items: stretch;
-      /* Fill viewport height without pushing Generate below the fold */
-      height: calc(100vh - 128px);
-      max-height: calc(100vh - 128px);
+      /* Fill remaining viewport after slim top chrome (banner + wallet + header) */
+      height: calc(100vh - 148px);
+      max-height: calc(100vh - 148px);
       min-height: 420px;
     }
   }
@@ -280,21 +289,10 @@
   }
   .wallet-bar {
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-    padding: 8px 12px; border: 1px solid var(--border); border-radius: 12px;
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px;
     background: rgba(91,75,255,0.08);
   }
-  .wallet-bar .hint { margin: 0; }
-  .contact-card {
-    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card);
-  }
-  .contact-card a.x-link { color: #9b7fe8; font-weight: 600; text-decoration: none; font-size: 14px; }
-  .contact-card a.x-link:hover { text-decoration: underline; }
-  .contact-card .terms-link {
-    font-size: 13px; color: var(--muted); text-decoration: none;
-    display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
-  }
-  .contact-card .terms-link:hover { color: #CCCEEF; }
+  .wallet-bar .hint { margin: 0; font-size: 12px; }
   .modal-overlay {
     display: none; position: fixed; inset: 0; z-index: 1100;
     background: rgba(8, 10, 24, 0.78); align-items: center; justify-content: center;
@@ -436,9 +434,6 @@
 </head>
 <body>
   <div class="shell">
-    <div class="privacy" role="note">
-      Privacy: we process uploads only for this job. Downloads auto-expire — we don’t keep your docs on the server.
-    </div>
     <div class="topbar">
       <header>
         <div class="mark" aria-hidden="true">Ld</div>
@@ -449,10 +444,9 @@
       </header>
     </div>
 
-    <div class="privacy" id="payDisclaimer" role="note">
-      Beta disclaimer: Lightdocs is provided as-is. AI output is not professional advice. No refunds.
-      Pricing and terms may change to regular pricing after testing. Service may change or end.
-      Wallet connection stays on this device — we don’t keep your address after the job.
+    <div class="privacy slim" id="payDisclaimer" role="note">
+      <span id="payDisclaimerText">Beta · as-is · no refunds · pricing may change · docs aren’t kept on the server · wallet stays on this device.</span>
+      <a class="terms-link" href="#" id="openTermsBtn">📋 Terms &amp; Disclaimer</a>
     </div>
     <div class="wallet-bar" id="walletBar">
       <button type="button" class="btn btn-ghost btn-sm" id="walletConnectBtn">Connect wallet</button>
@@ -462,15 +456,6 @@
         <option value="LCAI">LCAI ($1)</option>
       </select>
       <span class="hint" id="walletStatus">Connect wallet for 100 free beta docs, then $1/mo (KEIKO −20%).</span>
-    </div>
-
-    <div class="contact-card" id="contactCard">
-      <div>
-        <div class="field" style="margin-bottom:4px">Contact</div>
-        <a class="x-link" href="https://x.com/KeikoDevLCAI" target="_blank" rel="noopener">𝕏 @KeikoDevLCAI</a>
-        <div class="hint" style="margin-top:4px">Questions or feedback</div>
-      </div>
-      <a class="terms-link" href="#" id="openTermsBtn">📋 Terms &amp; Disclaimer</a>
     </div>
 
     <div class="workspace">
@@ -696,6 +681,8 @@
     </footer>
     <div class="site-footer-x">
       <a href="https://x.com/KeikoDevLCAI" target="_blank" rel="noopener">𝕏 @KeikoDevLCAI</a>
+      <span style="opacity:0.5;margin:0 8px">·</span>
+      <a href="#" id="openTermsFooter" style="color:var(--muted);font-weight:600;text-decoration:none">Terms &amp; Disclaimer</a>
     </div>
   </div>
 
@@ -870,6 +857,9 @@
     openTermsBtn?.focus();
   }
   openTermsBtn?.addEventListener("click", (e) => { e.preventDefault(); openTermsModal(); });
+  document.getElementById("openTermsFooter")?.addEventListener("click", (e) => {
+    e.preventDefault(); openTermsModal();
+  });
   termsCloseBtn?.addEventListener("click", closeTermsModal);
   termsCloseX?.addEventListener("click", closeTermsModal);
   termsModal?.addEventListener("click", (e) => {
@@ -1252,7 +1242,7 @@
       const r = await fetch(API + "/api/pay/config");
       payConfig = await r.json();
       if (payConfig && payConfig.disclaimer) {
-        const el = document.getElementById("payDisclaimer");
+        const el = document.getElementById("payDisclaimerText");
         if (el) el.textContent = payConfig.disclaimer;
       }
       const addr = connectedWallet();

@@ -925,20 +925,32 @@ def process_job(
         if _looks_like_instruction_leak(md) or not md.strip():
             md = _simple_doc_from_input(combined)
 
-        # Deterministic chart fallback when user asked for a chart
         chart_type = str(extras.get("chart_type") or "auto").lower()
-        if extras.get("want_chart"):
+        if chart_type not in ("auto", "bar", "line", "pie"):
+            chart_type = "auto"
+
+        # Bare numeric input: never trust model prose (it hallucinates on trivial input).
+        # Build the doc (and optional chart) deterministically from the user's own numbers.
+        _numeric = try_parse_numeric_series(combined, chart_type)
+        if _numeric:
+            md = _simple_doc_from_input(combined)
+            if extras.get("want_chart"):
+                cols = extras.get("chart_colors")
+                if isinstance(cols, list) and cols:
+                    _numeric["colors"] = cols
+                meta["charts"] = [_numeric]
+            else:
+                meta["charts"] = []
+        elif extras.get("want_chart"):
+            # Non-numeric prose + chart requested: keep model md; fill chart if missing
             charts0 = meta.get("charts") if isinstance(meta.get("charts"), list) else []
             if not charts0:
                 fallback = try_parse_numeric_series(combined, chart_type)
                 if fallback:
-                    # honor user colors if provided
                     cols = extras.get("chart_colors")
                     if isinstance(cols, list) and cols:
                         fallback["colors"] = cols
                     meta["charts"] = [fallback]
-                    if _looks_like_instruction_leak(md) or not md.strip():
-                        md = _simple_doc_from_input(combined)
 
         # mode defaults: sheet→xlsx builder path if sheets present even when md empty
         if mode == "sheet" and output not in ("xlsx", "pptx") and meta.get("sheets"):

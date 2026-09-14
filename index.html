@@ -269,11 +269,28 @@
   }
   .editor-toolbar {
     display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex-shrink: 0;
+    padding-right: 96px;
   }
   .editor-toolbar .btn-sm { min-height: 44px; }
   .editor-toolbar select, .editor-toolbar input[type="color"] {
     min-height: 44px; width: auto; min-width: 44px; padding: 6px 8px;
   }
+  .editor-toolbar .btn-ghost, .obj-controls .btn-ghost {
+    background: #fff; color: #14152C; border-color: #c9cbe0;
+  }
+  .editor-toolbar .btn-ghost:hover:not(:disabled),
+  .obj-controls .btn-ghost:hover:not(:disabled) {
+    border-color: var(--purple); color: #14152C; background: #eef0ff;
+  }
+  .editor-toolbar .btn-ghost:disabled, .obj-controls .btn-ghost:disabled {
+    color: #9aa0c8; border-color: #d8d9e6; background: #f0f0f5;
+  }
+  .color-picker { display: inline-flex; align-items: center; gap: 4px; }
+  .color-picker .swatch {
+    width: 22px; height: 22px; padding: 0; border-radius: 6px;
+    border: 1px solid #c9cbe0; cursor: pointer;
+  }
+  .color-picker .swatch:hover { outline: 2px solid var(--purple); outline-offset: 1px; }
   .editor-canvas {
     flex: 1 1 auto; min-height: 220px; overflow: auto;
     background: #f7f7fb; color: #14152C; border: 1px solid var(--border);
@@ -285,8 +302,11 @@
   }
   .editor-expand-btn {
     position: absolute; top: 8px; right: 8px; z-index: 2;
-    min-height: 44px; min-width: 44px;
+    min-height: 44px; min-width: 44px; padding: 8px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: rgba(20,21,44,0.92); color: #fff;
+    font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
   }
+  .editor-expand-btn:hover { border-color: var(--purple); }
   .wallet-bar {
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px;
@@ -641,7 +661,15 @@
                 <option value="Trebuchet MS">Trebuchet MS</option>
                 <option value="Courier New">Courier New</option>
               </select>
-              <input type="color" id="fmtColor" value="#14152C" aria-label="Font color" title="Font color">
+              <span class="color-picker" role="group" aria-label="Font color">
+                <button type="button" class="swatch" data-color="#14152C" title="Black" style="background:#14152C"></button>
+                <button type="button" class="swatch" data-color="#D22B2B" title="Red" style="background:#D22B2B"></button>
+                <button type="button" class="swatch" data-color="#E67E22" title="Orange" style="background:#E67E22"></button>
+                <button type="button" class="swatch" data-color="#2E9B57" title="Green" style="background:#2E9B57"></button>
+                <button type="button" class="swatch" data-color="#2D6CDF" title="Blue" style="background:#2D6CDF"></button>
+                <button type="button" class="swatch" data-color="#7A3FF2" title="Purple" style="background:#7A3FF2"></button>
+                <input type="color" id="fmtColor" value="#14152C" aria-label="Custom color" title="Custom color">
+              </span>
               <button type="button" class="btn btn-ghost btn-sm" id="insertImageBtn">Add image</button>
               <input type="file" id="editorImageFile" accept="image/*" hidden aria-label="Upload image for editor">
             </div>
@@ -1143,6 +1171,15 @@
       c.setColor(fmtColor.value).run();
     }));
   }
+  document.querySelectorAll(".color-picker .swatch").forEach((sw) => {
+    sw.addEventListener("mousedown", (e) => e.preventDefault());
+    sw.addEventListener("click", () => withEditor((ed) => {
+      const c = ed.chain();
+      if (ed.editor.state.selection.empty) c.selectAll();
+      c.setColor(sw.dataset.color).run();
+      if (fmtColor) fmtColor.value = sw.dataset.color;
+    }));
+  });
 
   if (editorExpandBtn) {
     editorExpandBtn.addEventListener("click", async () => {
@@ -1151,7 +1188,7 @@
       fsBody.innerHTML = "";
       const host = document.createElement("div");
       host.style.minHeight = "70vh";
-      host.style.background = "#f7f7fb";
+      host.style.background = "#1a1b36";
       host.style.padding = "12px";
       host.style.borderRadius = "10px";
       // Move the live nodes (listeners preserved) so full-screen has the full toolbar.

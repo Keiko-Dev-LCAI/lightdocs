@@ -104,11 +104,48 @@
   .status.busy { color: #CCCEEF; border-color: rgba(91,75,255,0.45); }
   .status.ok { color: var(--green); border-color: rgba(76,175,125,0.45); }
   .status.err { color: #ff8a80; border-color: rgba(255,82,82,0.4); }
+  .result-toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .toggle-group {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  }
+  .toggle-group button {
+    min-height: 36px; padding: 6px 12px; border: none; background: transparent;
+    color: var(--text2); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  .toggle-group button.active { background: rgba(91,75,255,0.28); color: #fff; }
   .result {
     flex: 1; white-space: pre-wrap; word-break: break-word; font-size: 15px; color: var(--text);
     background: #12132a; border: 1px solid var(--border); border-radius: 12px; padding: 14px;
     overflow: auto; max-height: 50vh; min-height: 140px;
   }
+  .preview-pane {
+    flex: 1; background: #f4f4f8; color: #14152C; border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px; overflow: auto; max-height: 50vh; min-height: 140px;
+    font-size: 14px; line-height: 1.45;
+  }
+  .preview-pane.hidden, .result.hidden { display: none; }
+  .preview-pane h1, .preview-pane h2, .preview-pane h3 { color: #14152C; margin: 0.6em 0 0.35em; }
+  .preview-pane p, .preview-pane li { margin: 0.35em 0; }
+  .preview-pane a { color: #5B4BFF; }
+  .preview-pane table {
+    width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; background: #fff;
+  }
+  .preview-pane th, .preview-pane td {
+    border: 1px solid #c8c9e0; padding: 6px 8px; text-align: left; vertical-align: top;
+  }
+  .preview-pane th { background: #ebe9ff; color: #5B4BFF; }
+  .preview-pane .sheet-block { margin-bottom: 16px; }
+  .preview-pane .sheet-block h3 { font-size: 15px; margin-bottom: 6px; }
+  .preview-pane .slide-card {
+    background: #fff; border: 1px solid #c8c9e0; border-radius: 10px; padding: 12px; margin-bottom: 10px;
+  }
+  .preview-pane .slide-card h3 { margin: 0 0 8px; font-size: 15px; color: #5B4BFF; }
+  .preview-pane .slide-card ul { margin: 0; padding-left: 18px; }
+  .preview-pane .docx-box { background: #fff; padding: 8px; border-radius: 8px; overflow-x: auto; }
+  .preview-pane .docx-box section.docx { margin: 0 auto; }
+  .preview-fallback { color: #5a5c7a; font-style: italic; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .actions .btn { flex: 1; min-width: 120px; }
   .draft-list { display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow: auto; }
@@ -244,7 +281,17 @@
       <div class="col">
         <div class="card grow">
           <div class="status" id="status">Ready — paste notes or add a photo, then Generate.</div>
-          <div class="result" id="result" aria-live="polite">Result text shows here for Copy. Download delivers the real file.</div>
+          <div class="result-toolbar">
+            <label class="field" style="margin:0">Result</label>
+            <div class="toggle-group" role="group" aria-label="Preview or raw text">
+              <button type="button" id="viewPreviewBtn" class="active">Preview</button>
+              <button type="button" id="viewRawBtn">Raw text</button>
+            </div>
+          </div>
+          <div class="preview-pane" id="preview" aria-live="polite">
+            <p class="preview-fallback">Preview shows here after Generate. Raw text still powers Copy.</p>
+          </div>
+          <div class="result hidden" id="result" aria-live="polite">Result text shows here for Copy. Download delivers the real file.</div>
           <div class="actions">
             <button class="btn btn-accent" id="copyBtn" type="button" disabled>Copy</button>
             <button class="btn btn-ghost" id="downloadBtn" type="button" disabled>Download</button>
@@ -280,6 +327,9 @@
   const generate = document.getElementById("generate");
   const status = document.getElementById("status");
   const result = document.getElementById("result");
+  const preview = document.getElementById("preview");
+  const viewPreviewBtn = document.getElementById("viewPreviewBtn");
+  const viewRawBtn = document.getElementById("viewRawBtn");
   const copyBtn = document.getElementById("copyBtn");
   const downloadBtn = document.getElementById("downloadBtn");
   const jobHint = document.getElementById("jobHint");
@@ -296,12 +346,249 @@
   let lastText = "";
   let lastDownloadUrl = "";
   let lastDownloadName = "lightdocs-out.bin";
+  let lastOutput = "docx";
+  let viewMode = "preview"; // preview | raw
   let pollTimer = null;
   let imageFiles = [];
   let activeDraftId = null;
   let autosaveTimer = null;
   let userTouchedStyle = false;
   let userTouchedOut = false;
+
+  // Lazy-loaded preview libs (not on first paint)
+  const libCache = { markdownIt: null, docxPreview: null, pdfJs: null };
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-ld-src="' + src + '"]');
+      if (existing) {
+        if (existing.dataset.loaded === "1") return resolve();
+        existing.addEventListener("load", () => resolve());
+        existing.addEventListener("error", () => reject(new Error("script load failed")));
+        return;
+      }
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.dataset.ldSrc = src;
+      s.onload = () => { s.dataset.loaded = "1"; resolve(); };
+      s.onerror = () => reject(new Error("Failed to load " + src));
+      document.head.appendChild(s);
+    });
+  }
+  async function ensureMarkdownIt() {
+    if (libCache.markdownIt) return libCache.markdownIt;
+    await loadScript("https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js");
+    if (!window.markdownit) throw new Error("markdown-it missing");
+    libCache.markdownIt = window.markdownit({ html: false, linkify: true, breaks: true });
+    return libCache.markdownIt;
+  }
+  async function ensureDocxPreview() {
+    if (libCache.docxPreview) return libCache.docxPreview;
+    await loadScript("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js");
+    await loadScript("https://cdn.jsdelivr.net/npm/docx-preview@0.3.6/dist/docx-preview.min.js");
+    if (!window.docx) throw new Error("docx-preview missing");
+    libCache.docxPreview = window.docx;
+    return libCache.docxPreview;
+  }
+  /**
+   * Dormant PDF.js hook — PDF output not shipped yet.
+   * When it is, call ensurePdfJs().load() then pdfjsLib.getDocument(url) into #preview.
+   */
+  async function ensurePdfJs() {
+    if (libCache.pdfJs) return libCache.pdfJs;
+    libCache.pdfJs = {
+      dormant: true,
+      load: async () => {
+        await loadScript("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js");
+        if (!window.pdfjsLib) throw new Error("pdf.js missing");
+        return window.pdfjsLib;
+      }
+    };
+    return libCache.pdfJs;
+  }
+  window.LIGHTDOCS_PDF_PREVIEW = { ensure: ensurePdfJs, ready: false };
+
+  function setViewMode(mode) {
+    viewMode = mode === "raw" ? "raw" : "preview";
+    viewPreviewBtn.classList.toggle("active", viewMode === "preview");
+    viewRawBtn.classList.toggle("active", viewMode === "raw");
+    preview.classList.toggle("hidden", viewMode !== "preview");
+    result.classList.toggle("hidden", viewMode !== "raw");
+  }
+  viewPreviewBtn.addEventListener("click", () => setViewMode("preview"));
+  viewRawBtn.addEventListener("click", () => setViewMode("raw"));
+
+  function showRawFallback(msg) {
+    result.textContent = lastText || "(empty)";
+    preview.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "preview-fallback";
+    p.textContent = msg || "Preview unavailable — showing raw text. Use the Raw text toggle or Copy.";
+    preview.appendChild(p);
+    // Keep raw populated; if preview empty of content, user can switch
+    if (!lastText) {
+      const pre = document.createElement("pre");
+      pre.style.whiteSpace = "pre-wrap";
+      pre.textContent = "(empty)";
+      preview.appendChild(pre);
+    } else {
+      const pre = document.createElement("pre");
+      pre.style.whiteSpace = "pre-wrap";
+      pre.style.margin = "8px 0 0";
+      pre.style.color = "#14152C";
+      pre.textContent = lastText;
+      preview.appendChild(pre);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function tryParseJsonPayload(text) {
+    const t = (text || "").trim();
+    if (!t) return null;
+    try { return JSON.parse(t); } catch (_) {}
+    const m = t.match(/(\[[\s\S]*\]|\{[\s\S]*\})\s*$/);
+    if (m) {
+      try { return JSON.parse(m[1]); } catch (_) {}
+    }
+    return null;
+  }
+
+  function renderSheetsHtml(payload) {
+    let sheets = null;
+    if (Array.isArray(payload)) sheets = payload;
+    else if (payload && Array.isArray(payload.sheets)) sheets = payload.sheets;
+    if (!sheets || !sheets.length) return null;
+    const wrap = document.createElement("div");
+    sheets.slice(0, 8).forEach((spec) => {
+      const block = document.createElement("div");
+      block.className = "sheet-block";
+      const h = document.createElement("h3");
+      h.textContent = (spec && spec.name) || "Sheet";
+      block.appendChild(h);
+      const table = document.createElement("table");
+      const cols = (spec && spec.columns) || [];
+      if (cols.length) {
+        const thead = document.createElement("thead");
+        const tr = document.createElement("tr");
+        cols.forEach((c) => {
+          const th = document.createElement("th");
+          th.textContent = String(c);
+          tr.appendChild(th);
+        });
+        thead.appendChild(tr);
+        table.appendChild(thead);
+      }
+      const tbody = document.createElement("tbody");
+      ((spec && spec.rows) || []).slice(0, 200).forEach((row) => {
+        const tr = document.createElement("tr");
+        const cells = Array.isArray(row) ? row : [row];
+        const n = Math.max(cols.length || 0, cells.length);
+        for (let i = 0; i < n; i++) {
+          const td = document.createElement("td");
+          td.textContent = cells[i] == null ? "" : String(cells[i]);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      block.appendChild(table);
+      wrap.appendChild(block);
+    });
+    return wrap;
+  }
+
+  function renderSlidesHtml(payload) {
+    let slides = null;
+    if (Array.isArray(payload)) slides = payload;
+    else if (payload && Array.isArray(payload.slides)) slides = payload.slides;
+    if (!slides || !slides.length) return null;
+    const wrap = document.createElement("div");
+    slides.slice(0, 20).forEach((spec, idx) => {
+      const card = document.createElement("div");
+      card.className = "slide-card";
+      const h = document.createElement("h3");
+      h.textContent = (idx + 1) + ". " + ((spec && spec.title) || "Slide");
+      card.appendChild(h);
+      const ul = document.createElement("ul");
+      ((spec && spec.bullets) || []).slice(0, 12).forEach((b) => {
+        const li = document.createElement("li");
+        li.textContent = String(b);
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+      wrap.appendChild(card);
+    });
+    return wrap;
+  }
+
+  async function renderPreview() {
+    preview.innerHTML = "";
+    result.textContent = lastText || "(empty)";
+    const fmt = lastOutput || "docx";
+    try {
+      if (fmt === "pdf") {
+        // Dormant until PDF output ships (hook registered; do not fetch PDF.js yet)
+        await ensurePdfJs();
+        showRawFallback("PDF preview hook is ready — PDF output not shipped yet. Showing text.");
+        return;
+      }
+      if (fmt === "md") {
+        const md = await ensureMarkdownIt();
+        const html = md.render(lastText || "");
+        preview.innerHTML = html || '<p class="preview-fallback">(empty)</p>';
+        return;
+      }
+      if (fmt === "xlsx") {
+        const payload = tryParseJsonPayload(lastText);
+        const node = renderSheetsHtml(payload);
+        if (node) { preview.appendChild(node); return; }
+        showRawFallback("Could not build sheet table from result — showing text.");
+        return;
+      }
+      if (fmt === "pptx") {
+        const payload = tryParseJsonPayload(lastText);
+        const node = renderSlidesHtml(payload);
+        if (node) { preview.appendChild(node); return; }
+        // fallback: treat as markdown outline
+        try {
+          const md = await ensureMarkdownIt();
+          preview.innerHTML = md.render(lastText || "");
+          return;
+        } catch (_) {
+          showRawFallback("Could not build slide list — showing text.");
+          return;
+        }
+      }
+      // docx (default)
+      if (lastDownloadUrl) {
+        const docxApi = await ensureDocxPreview();
+        const resp = await fetch(lastDownloadUrl);
+        if (!resp.ok) throw new Error("docx fetch " + resp.status);
+        const buf = await resp.arrayBuffer();
+        const box = document.createElement("div");
+        box.className = "docx-box";
+        preview.appendChild(box);
+        await docxApi.renderAsync(buf, box, null, {
+          className: "docx",
+          inWrapper: true,
+          ignoreWidth: false,
+          breakPages: false
+        });
+        return;
+      }
+      // no file — try markdown render of text
+      const md = await ensureMarkdownIt();
+      preview.innerHTML = md.render(lastText || "") || '<p class="preview-fallback">(empty)</p>';
+    } catch (e) {
+      console.warn("[lightdocs preview]", e);
+      showRawFallback("Preview failed — falling back to plain text.");
+    }
+  }
 
   const MODE_HINTS = {
     "notes-word": "Phone photo or paste handwritten notes → clean Word-style notes.",
@@ -526,13 +813,20 @@
     modeHint.textContent = MODE_HINTS[modeEl.value] || "";
     outHint.textContent = OUT_HINTS[outfmt.value] || "";
     lastText = d.resultText || "";
-    result.textContent = lastText || "Result text shows here for Copy. Download delivers the real file.";
+    lastOutput = d.output || outfmt.value || "docx";
     lastDownloadUrl = "";
+    result.textContent = lastText || "Result text shows here for Copy. Download delivers the real file.";
     restoreImages(d.images || []);
     setBusy(false);
     copyBtn.disabled = !lastText;
     downloadBtn.disabled = true;
     setStatus("ok", "Draft opened (this device only). Generate again for a fresh file.");
+    if (lastText) {
+      setViewMode("preview");
+      renderPreview();
+    } else {
+      preview.innerHTML = '<p class="preview-fallback">Preview shows here after Generate. Raw text still powers Copy.</p>';
+    }
     renderDrafts();
   }
 
@@ -587,17 +881,20 @@
   }
   function applyDone(data) {
     lastText = data.text || "";
-    result.textContent = lastText || "(empty)";
+    lastOutput = data.output || outfmt.value || "docx";
     lastDownloadUrl = data.download_url
       ? (data.download_url.startsWith("http") ? data.download_url : API + data.download_url)
       : "";
-    lastDownloadName = data.download_name || ("lightdocs." + (data.output || "bin"));
+    lastDownloadName = data.download_name || ("lightdocs." + (lastOutput || "bin"));
+    result.textContent = lastText || "(empty)";
     setStatus("ok", data.step || "Done — download ready.");
     jobHint.textContent = data.job_id
       ? ("Job " + data.job_id.slice(0, 8) + "… · drafts stay on this device only")
       : "";
     localStorage.removeItem(JOB_KEY);
     setBusy(false);
+    setViewMode("preview");
+    renderPreview();
     queueAutosave();
   }
   function startPolling(jobId) {
@@ -665,7 +962,10 @@
       setStatus("err", "Paste notes or add at least one photo.");
       return;
     }
-    lastText = ""; lastDownloadUrl = ""; result.textContent = "";
+    lastText = ""; lastDownloadUrl = ""; lastOutput = outfmt.value;
+    result.textContent = "";
+    preview.innerHTML = '<p class="preview-fallback">Generating… preview will appear when ready.</p>';
+    setViewMode("preview");
     setBusy(true);
     setStatus("busy", "Starting job…");
     try {

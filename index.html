@@ -601,7 +601,9 @@
           <div class="editor-shell hidden" id="editorShell" aria-label="Document editor">
             <button type="button" class="btn btn-ghost btn-sm editor-expand-btn" id="editorExpandBtn"
               aria-label="Expand editor to full screen" aria-expanded="false">Expand</button>
-            <div class="editor-toolbar" role="toolbar" aria-label="Text formatting">
+            <div class="editor-toolbar" id="editorToolbar" role="toolbar" aria-label="Text formatting">
+              <button type="button" class="btn btn-ghost btn-sm" id="fmtUndo" aria-label="Undo" title="Undo">↶ Undo</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="fmtRedo" aria-label="Redo" title="Redo">↷ Redo</button>
               <button type="button" class="btn btn-ghost btn-sm" id="fmtBold" aria-label="Bold"><strong>B</strong></button>
               <button type="button" class="btn btn-ghost btn-sm" id="fmtItalic" aria-label="Italic"><em>I</em></button>
               <button type="button" class="btn btn-ghost btn-sm" id="fmtUnderline" aria-label="Underline"><u>U</u></button>
@@ -778,6 +780,9 @@
   const imgMoveDownBtn = document.getElementById("imgMoveDownBtn");
   const imgDeleteBtn = document.getElementById("imgDeleteBtn");
   const editorHint = document.getElementById("editorHint");
+  const editorToolbar = document.getElementById("editorToolbar");
+  const fmtUndo = document.getElementById("fmtUndo");
+  const fmtRedo = document.getElementById("fmtRedo");
   const fmtBold = document.getElementById("fmtBold");
   const fmtItalic = document.getElementById("fmtItalic");
   const fmtUnderline = document.getElementById("fmtUnderline");
@@ -927,11 +932,14 @@
   }
   function closeFullscreenPreview() {
     if (fsMode === "editor") {
-      while (fsBody.firstChild) {
-        const wrap = fsBody.firstChild;
-        while (wrap.firstChild) editorCanvas.appendChild(wrap.firstChild);
-        fsBody.removeChild(wrap);
+      const shell = document.getElementById("editorShell");
+      const hint = document.getElementById("editorHint");
+      if (shell && hint) {
+        if (editorToolbar) shell.insertBefore(editorToolbar, hint);
+        if (objControls) shell.insertBefore(objControls, hint);
+        if (editorCanvas) shell.insertBefore(editorCanvas, hint);
       }
+      fsBody.innerHTML = "";
       if (editorExpandBtn) editorExpandBtn.setAttribute("aria-expanded", "false");
       if (fsTitle) fsTitle.textContent = "Document preview";
       fsMode = "preview";
@@ -1048,6 +1056,8 @@
     if (!docEditor) return;
     fn(docEditor);
   }
+  if (fmtUndo) fmtUndo.addEventListener("click", () => withEditor((ed) => ed.chain().undo().run()));
+  if (fmtRedo) fmtRedo.addEventListener("click", () => withEditor((ed) => ed.chain().redo().run()));
   if (fmtBold) fmtBold.addEventListener("click", () => withEditor((ed) => ed.chain().toggleBold().run()));
   if (fmtItalic) fmtItalic.addEventListener("click", () => withEditor((ed) => ed.chain().toggleItalic().run()));
   if (fmtUnderline) fmtUnderline.addEventListener("click", () => withEditor((ed) => ed.chain().toggleUnderline().run()));
@@ -1074,8 +1084,11 @@
       host.style.background = "#f7f7fb";
       host.style.padding = "12px";
       host.style.borderRadius = "10px";
+      // Move the live nodes (listeners preserved) so full-screen has the full toolbar.
+      if (editorToolbar) host.appendChild(editorToolbar);
+      if (objControls) host.appendChild(objControls);
+      host.appendChild(editorCanvas);
       fsBody.appendChild(host);
-      while (editorCanvas.firstChild) host.appendChild(editorCanvas.firstChild);
       if (fsTitle) fsTitle.textContent = "Document editor";
       fsOverlay.classList.add("open");
       document.body.style.overflow = "hidden";

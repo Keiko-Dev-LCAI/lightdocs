@@ -28,6 +28,7 @@ async function loadTiptap() {
     { default: Color },
     { FontFamily },
     { Underline },
+    { default: TextAlign },
   ] = await Promise.all([
     import(ESM("@tiptap/core@2.11.5")),
     import(ESM("@tiptap/starter-kit@2.11.5")),
@@ -35,6 +36,7 @@ async function loadTiptap() {
     import(ESM("@tiptap/extension-color@2.11.5")),
     import(ESM("@tiptap/extension-font-family@2.11.5")),
     import(ESM("@tiptap/extension-underline@2.11.5")),
+    import(ESM("@tiptap/extension-text-align@2.11.5")),
   ]);
   return {
     Editor: core.Editor,
@@ -46,6 +48,7 @@ async function loadTiptap() {
     Color,
     FontFamily,
     Underline,
+    TextAlign,
   };
 }
 
@@ -229,6 +232,7 @@ export async function createLightdocsEditor(opts) {
     Color,
     FontFamily,
     Underline,
+    TextAlign,
   } = await loadTiptap();
   const DocImage = createDocImage({ Node, mergeAttributes });
   const FontSize = createFontSize({ Extension });
@@ -243,6 +247,7 @@ export async function createLightdocsEditor(opts) {
       FontFamily,
       FontSize,
       Underline,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
       DocImage,
     ],
     content: html || "<p></p>",
@@ -292,6 +297,7 @@ export async function createLightdocsEditor(opts) {
           level: node.attrs.level || 1,
           text: node.textContent,
           runs: runsFromInline(node),
+          align: node.attrs.textAlign || null,
         });
       } else if (node.type.name === "bulletList") {
         node.forEach((li) => {
@@ -315,12 +321,14 @@ export async function createLightdocsEditor(opts) {
           type: "paragraph",
           text: node.textContent,
           runs: runsFromInline(node),
+          align: node.attrs.textAlign || null,
         });
       } else if (node.isTextblock) {
         blocks.push({
           type: "paragraph",
           text: node.textContent,
           runs: runsFromInline(node),
+          align: node.attrs.textAlign || null,
         });
       }
     });

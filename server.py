@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.6.3"
+VERSION = "0.7.0"
 
 VALID_MODES = frozenset(
     {
@@ -163,6 +163,25 @@ def ocr_image_bytes(data: bytes) -> str:
     except Exception as e:
         print(f"[ocr] failed: {e}")
         return ""
+
+
+def extract_document_text(filename: str, data: bytes) -> str:
+    """Pull plain text out of an uploaded document (PDF / Word / text-like)."""
+    name = (filename or "").lower()
+    try:
+        if name.endswith((".txt", ".md", ".markdown", ".csv", ".rtf", ".log")):
+            return data.decode("utf-8", errors="replace")
+        if name.endswith(".docx"):
+            from docx import Document as _Doc
+            d = _Doc(io.BytesIO(data))
+            return "\n".join(p.text for p in d.paragraphs)
+        if name.endswith(".pdf"):
+            from pypdf import PdfReader
+            r = PdfReader(io.BytesIO(data))
+            return "\n".join((pg.extract_text() or "") for pg in r.pages)
+    except Exception as e:
+        print(f"[doc] extract failed for {filename}: {e}")
+    return ""
 
 
 def _is_unavailable_reply(text: str) -> bool:
@@ -486,25 +505,32 @@ MODE_TASKS: dict[str, str] = {
         "governance vote. The LCAI DUNA is a Wyoming Decentralized Unincorporated Nonprofit "
         "Association; authority rests with governance / the community via a DAO vote. There is NO "
         "'governor' role — NEVER write 'DUNA governor' or say a governor authorizes anything. "
-        "Match the real Lightchain proposal structure and sober legal tone, sections in order:\n"
+        "Write a COMPLETE, substantial proposal — the kind a community would actually read and vote "
+        "on — not a terse stub. Develop each section into full, well-reasoned prose; do not reduce a "
+        "section to a single line. Match the real Lightchain proposal structure and sober legal tone, "
+        "sections in order:\n"
         "Title — [Verb] [Subject], plain and specific, no hype.\n"
-        "Summary — 1-2 short paragraphs stating exactly what is adopted/authorized.\n"
-        "Motivation — why this is needed (short paragraphs).\n"
-        "Proposal — an 'Authorize the following:' list of the specific, concrete authorizations.\n"
-        "Scope and limitations — what this proposal does NOT authorize.\n"
-        "Execution — plain prose on what happens upon passage; say 'No on-chain treasury action is "
-        "required' when true.\n"
+        "Summary — a full paragraph (3-5 sentences) stating exactly what is adopted/authorized and "
+        "the change it makes.\n"
+        "Motivation — 2-3 developed paragraphs: the problem today, why it matters, and how this "
+        "proposal addresses it, reasoning from the INPUT and general governance context.\n"
+        "Proposal — an 'Authorize the following:' list of the specific, concrete authorizations, each "
+        "item a full clause that expands on what it entails.\n"
+        "Scope and limitations — a developed paragraph on what this proposal does NOT authorize and "
+        "the boundaries that remain in place.\n"
+        "Execution — a full paragraph on what happens upon passage, the sequencing, and who acts; say "
+        "'No on-chain treasury action is required' when true.\n"
         "Voting options — exactly three, each a full sentence: For (adoption), Against (rejection), "
         "Abstain (counts toward quorum; no vote for or against).\n"
         "Include these OPTIONAL sections ONLY if the INPUT supports them: Legal Basis (prior proposal "
         "numbers/Articles only if given), Official copy (File / URL / SHA-256 only if provided), "
         "Rationale, Constraints.\n"
         "House style: sober, transparent, precise governance/legal register; refer to 'the Association' "
-        "or 'the LCAI DUNA'; Wyoming governing-law framing where relevant. NEVER invent proposal IDs, "
-        "tx hashes, SHA-256 values, treasury balances, vote counts, dates, wallet addresses, or names "
-        "— use [TO FILL] only where a genuinely required specific is missing. Do NOT append a "
-        "'Governance / execution footer' or any voting-window / on-chain-record / dao.lightchain.ai "
-        "placeholder block; that format is wrong."
+        "or 'the LCAI DUNA'; Wyoming governing-law framing where relevant. Develop the argument fully, "
+        "but NEVER invent proposal IDs, tx hashes, SHA-256 values, treasury balances, vote counts, "
+        "dates, wallet addresses, or names — use [TO FILL] only where a genuinely required specific is "
+        "missing. Do NOT append a 'Governance / execution footer' or any voting-window / "
+        "on-chain-record / dao.lightchain.ai placeholder block; that format is wrong."
     ),
     "litepaper": (
         "Write a Lightchain-oriented litepaper / one-pager from INPUT: Title, Hook, "
@@ -846,6 +872,7 @@ def create_job():
     device_id = (request.headers.get("X-Device-Id") or "").strip()
     wallet = (request.headers.get("X-Wallet") or "").strip().lower()
     images: list[bytes] = []
+    doc_texts: list[str] = []
 
     if request.content_type and "multipart/form-data" in request.content_type:
         text = (request.form.get("text") or "").strip()
@@ -861,6 +888,12 @@ def create_job():
                     data = f.read()
                     if data and len(data) < 12_000_000:
                         images.append(data)
+        for key in ("docs", "doc", "document", "documents"):
+            for f in request.files.getlist(key):
+                if f and f.filename:
+                    data = f.read()
+                    if data and len(data) < 20_000_000:
+                        doc_texts.append(extract_document_text(f.filename, data))
     else:
         body = request.get_json(silent=True) or {}
         text = (body.get("text") or "").strip()
@@ -888,8 +921,14 @@ def create_job():
     if prop_type not in ("general", "treasury", "param", "signal", "grant"):
         prop_type = "general"
 
-    if not text and not images:
-        return jsonify({"error": "Provide text and/or at least one image"}), 400
+    if doc_texts:
+        joined = "\n\n".join(t.strip() for t in doc_texts if t and t.strip())
+        if joined:
+            text = (text + "\n\n" + joined).strip() if text else joined
+    text = text[:60000]
+
+    if not text and not images and not doc_texts:
+        return jsonify({"error": "Provide text, a document, and/or at least one image"}), 400
 
     device_id = str(device_id or "").strip() or "anon"
     ok_pay, pay_msg, pay_meta = _authorize_job(wallet, device_id=device_id)
@@ -1066,6 +1105,17 @@ def _apply_runs(paragraph, runs: list[Any], fallback_text: str = "") -> None:
             run.font.name = font.strip()[:60]
 
 
+def _apply_align(paragraph, align: Any) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    a = str(align or "").lower()
+    if a == "center":
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    elif a == "right":
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    elif a in ("left", "start"):
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+
 def build_docx_from_blocks(blocks: list[Any], path: Path) -> None:
     """Build a .docx from the editor document model (text + positioned images)."""
     doc = Document()
@@ -1079,12 +1129,15 @@ def build_docx_from_blocks(blocks: list[Any], path: Path) -> None:
             level = 1 if level < 1 else 3 if level > 3 else level
             p = doc.add_heading("", level=level)
             _apply_runs(p, runs, str(block.get("text") or "").strip() or " ")
+            _apply_align(p, block.get("align"))
         elif btype in ("bullet", "list_item", "list"):
             p = doc.add_paragraph(style="List Bullet")
             _apply_runs(p, runs, str(block.get("text") or "").strip())
+            _apply_align(p, block.get("align"))
         elif btype in ("number", "ordered"):
             p = doc.add_paragraph(style="List Number")
             _apply_runs(p, runs, str(block.get("text") or "").strip())
+            _apply_align(p, block.get("align"))
         elif btype == "image":
             src = block.get("src") or block.get("dataUrl") or ""
             blob = _decode_image_src(str(src))
@@ -1104,6 +1157,7 @@ def build_docx_from_blocks(blocks: list[Any], path: Path) -> None:
             if text.strip() or runs:
                 p = doc.add_paragraph()
                 _apply_runs(p, runs, text)
+                _apply_align(p, block.get("align"))
             elif btype == "paragraph":
                 doc.add_paragraph("")
     doc.save(str(path))

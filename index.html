@@ -588,12 +588,19 @@
               <input type="file" id="images" accept="image/*" capture="environment" multiple hidden
                 aria-label="Add photo from camera or gallery">
             </label>
+            <label class="btn btn-ghost" for="docs" title="Upload a document to read / explain">
+              📄 Upload document
+              <input type="file" id="docs"
+                accept=".pdf,.doc,.docx,.txt,.md,.markdown,.csv,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                multiple hidden aria-label="Upload a document to read or explain">
+            </label>
           </div>
           <p class="dictation-notice" id="dictationNotice">
             Dictation uses your browser’s built-in speech service, so your voice is processed by your browser provider — not by LightDocs. We never receive or store your audio.
           </p>
           <p class="dictation-status" id="dictationStatus" aria-live="polite"></p>
           <div class="thumbs" id="thumbs"></div>
+          <p class="hint" id="docList" style="margin-top:6px;"></p>
           <p class="hint">Safe to background the tab after Generate — we keep a job id until the download is ready.</p>
         </div>
         <div class="generate-wrap">
@@ -631,6 +638,19 @@
               <button type="button" class="btn btn-ghost btn-sm" id="fmtBold" aria-label="Bold"><strong>B</strong></button>
               <button type="button" class="btn btn-ghost btn-sm" id="fmtItalic" aria-label="Italic"><em>I</em></button>
               <button type="button" class="btn btn-ghost btn-sm" id="fmtUnderline" aria-label="Underline"><u>U</u></button>
+              <select id="fmtBlock" aria-label="Text style" title="Paragraph style">
+                <option value="p" selected>Normal</option>
+                <option value="h1">Title (H1)</option>
+                <option value="h2">Heading (H2)</option>
+                <option value="h3">Subheading (H3)</option>
+              </select>
+              <button type="button" class="btn btn-ghost btn-sm" id="fmtBullet" aria-label="Bulleted list" title="Bulleted list">• List</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="fmtOrdered" aria-label="Numbered list" title="Numbered list">1. List</button>
+              <span class="align-group" role="group" aria-label="Text alignment">
+                <button type="button" class="btn btn-ghost btn-sm" data-align="left" title="Align left">⇤</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-align="center" title="Center">≡</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-align="right" title="Align right">⇥</button>
+              </span>
               <select id="fmtSize" aria-label="Font size">
                 <option value="">Size</option>
                 <option value="8pt">8</option>
@@ -818,6 +838,8 @@
   const input = document.getElementById("input");
   const inputLabel = document.getElementById("inputLabel");
   const images = document.getElementById("images");
+  const docs = document.getElementById("docs");
+  const docList = document.getElementById("docList");
   const thumbs = document.getElementById("thumbs");
   const micBtn = document.getElementById("micBtn");
   const micLabel = document.getElementById("micLabel");
@@ -856,6 +878,9 @@
   const fmtSize = document.getElementById("fmtSize");
   const fmtFont = document.getElementById("fmtFont");
   const fmtColor = document.getElementById("fmtColor");
+  const fmtBlock = document.getElementById("fmtBlock");
+  const fmtBullet = document.getElementById("fmtBullet");
+  const fmtOrdered = document.getElementById("fmtOrdered");
   const walletConnectBtn = document.getElementById("walletConnectBtn");
   const walletTopupBtn = document.getElementById("walletTopupBtn");
   const walletStatus = document.getElementById("walletStatus");
@@ -909,6 +934,7 @@
   let editorLoading = false;
   let pollTimer = null;
   let imageFiles = [];
+  let docFiles = [];
   let activeDraftId = null;
   let autosaveTimer = null;
   let userTouchedStyle = false;
@@ -1018,6 +1044,7 @@
   }
   previewExpandBtn.addEventListener("click", openFullscreenPreview);
   fsCloseBtn.addEventListener("click", closeFullscreenPreview);
+  fsOverlay.addEventListener("click", (e) => { if (e.target === fsOverlay) closeFullscreenPreview(); });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     const sm = document.getElementById("modal-share");
@@ -1144,6 +1171,16 @@
   if (fmtBold) fmtBold.addEventListener("click", () => withEditor((ed) => ed.chain().toggleBold().run()));
   if (fmtItalic) fmtItalic.addEventListener("click", () => withEditor((ed) => ed.chain().toggleItalic().run()));
   if (fmtUnderline) fmtUnderline.addEventListener("click", () => withEditor((ed) => ed.chain().toggleUnderline().run()));
+  if (fmtBullet) fmtBullet.addEventListener("click", () => withEditor((ed) => ed.chain().toggleBulletList().run()));
+  if (fmtOrdered) fmtOrdered.addEventListener("click", () => withEditor((ed) => ed.chain().toggleOrderedList().run()));
+  if (fmtBlock) fmtBlock.addEventListener("change", () => withEditor((ed) => {
+    const v = fmtBlock.value;
+    if (v === "p") ed.chain().setParagraph().run();
+    else ed.chain().setHeading({ level: Number(v.slice(1)) }).run();
+  }));
+  document.querySelectorAll(".align-group [data-align]").forEach((b) => {
+    b.addEventListener("click", () => withEditor((ed) => ed.chain().setTextAlign(b.dataset.align).run()));
+  });
   if (fmtSize) fmtSize.addEventListener("change", () => withEditor((ed) => {
     const c = ed.chain();
     if (ed.editor.state.selection.empty) c.selectAll();
@@ -1219,6 +1256,13 @@
     try {
       const r = await fetch(API + "/api/pay/config");
       payConfig = await r.json();
+      const lcaiOpt = payCurrency.querySelector('option[value="LCAI"]');
+      if (lcaiOpt) {
+        const lcaiOn = !!(payConfig && payConfig.lcai_enabled && payConfig.lcai_receive);
+        lcaiOpt.hidden = !lcaiOn;
+        lcaiOpt.disabled = !lcaiOn;
+        if (!lcaiOn && payCurrency.value === "LCAI") payCurrency.value = "KEIKO";
+      }
       if (payConfig && payConfig.disclaimer) {
         const el = document.getElementById("payDisclaimerText");
         if (el) el.textContent = payConfig.disclaimer;
@@ -1589,7 +1633,11 @@
     }
     outHint.textContent = OUT_HINTS[outfmt.value] || "";
   }
-  modeEl.addEventListener("change", () => { applyModeDefaults(); queueAutosave(); });
+  modeEl.addEventListener("change", () => {
+    if (lastText || lastDownloadUrl) clearWorkspace();
+    applyModeDefaults();
+    queueAutosave();
+  });
   styleEl.addEventListener("change", () => { userTouchedStyle = true; });
   outfmt.addEventListener("change", () => {
     userTouchedOut = true;
@@ -1781,6 +1829,29 @@
     renderDrafts();
   }
 
+  function clearWorkspace() {
+    input.value = "";
+    if (draftName) draftName.value = "";
+    imageFiles = [];
+    if (images) images.value = "";
+    if (thumbs) thumbs.innerHTML = "";
+    docFiles = [];
+    if (docs) docs.value = "";
+    if (docList) docList.textContent = "";
+    lastText = "";
+    lastDownloadUrl = "";
+    lastDownloadName = "lightdocs-out.bin";
+    lastOutput = outfmt.value || "docx";
+    activeDraftId = null;
+    if (result) result.textContent = "";
+    if (preview) preview.innerHTML = '<p class="preview-fallback">Preview shows here after Generate. Raw text still powers Copy.</p>';
+    if (docEditor) { try { docEditor.destroy(); } catch (_) {} docEditor = null; }
+    setViewMode("preview");
+    syncEditorHints();
+    setBusy(false);
+    setStatus("", "Ready — paste notes or add a photo, then Generate.");
+  }
+
   saveDraftBtn.addEventListener("click", async () => {
     const rec = await snapshotDraft(activeDraftId);
     activeDraftId = rec.id;
@@ -1817,6 +1888,13 @@
       img.alt = f.name || "note photo";
       thumbs.appendChild(img);
     });
+    queueAutosave();
+  });
+  if (docs) docs.addEventListener("change", () => {
+    docFiles = Array.from(docs.files || []);
+    if (docList) docList.textContent = docFiles.length
+      ? ("Documents: " + docFiles.map((f) => f.name).join(", "))
+      : "";
     queueAutosave();
   });
 
@@ -2025,8 +2103,8 @@
   generate.addEventListener("click", async () => {
     if (!API) { setStatus("err", "API URL missing."); return; }
     const text = (input.value || "").trim();
-    if (!text && imageFiles.length === 0) {
-      setStatus("err", "Paste notes or add at least one photo.");
+    if (!text && imageFiles.length === 0 && docFiles.length === 0) {
+      setStatus("err", "Paste notes, upload a document, or add at least one photo.");
       return;
     }
     lastText = ""; lastDownloadUrl = ""; lastOutput = outfmt.value;
@@ -2046,6 +2124,7 @@
       const waddr = connectedWallet();
       if (waddr) fd.append("wallet", waddr);
       imageFiles.slice(0, 5).forEach((f) => fd.append("images", f, f.name || "note.jpg"));
+      docFiles.slice(0, 5).forEach((f) => fd.append("docs", f, f.name || "document"));
       const headers = { "X-Device-Id": deviceId };
       if (waddr) headers["X-Wallet"] = waddr;
       const r = await fetch(API + "/api/jobs", {

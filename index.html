@@ -669,6 +669,7 @@
           <div class="actions">
             <button class="btn btn-accent" id="copyBtn" type="button" disabled>Copy</button>
             <button class="btn btn-ghost" id="downloadBtn" type="button" disabled>Download</button>
+            <button class="btn btn-ghost" id="sendBtn" type="button" disabled title="Share or send via OrcaMail — file stays on your device">Send</button>
           </div>
           <p class="hint" id="jobHint"></p>
         </div>
@@ -825,6 +826,7 @@
   const chartCustomColor = document.getElementById("chartCustomColor");
   const copyBtn = document.getElementById("copyBtn");
   const downloadBtn = document.getElementById("downloadBtn");
+  const sendBtn = document.getElementById("sendBtn");
   const jobHint = document.getElementById("jobHint");
   const apiHint = document.getElementById("apiHint");
   const draftName = document.getElementById("draftName");
@@ -1030,6 +1032,7 @@
       setBusy(false);
       copyBtn.disabled = !lastText && !(docEditor && docEditor.getText());
       downloadBtn.disabled = false;
+      if (sendBtn) sendBtn.disabled = false;
     } catch (e) {
       console.warn("[lightdocs editor]", e);
       editorCanvas.innerHTML = '<p class="preview-fallback">Editor failed to load — use Preview / Raw. ' +
@@ -1609,7 +1612,9 @@
   function setBusy(on) {
     generate.disabled = on;
     copyBtn.disabled = on || !(lastText || (docEditor && docEditor.getText()));
-    downloadBtn.disabled = on || !(lastDownloadUrl || docEditor);
+    const canFile = !!(lastDownloadUrl || docEditor);
+    downloadBtn.disabled = on || !canFile;
+    if (sendBtn) sendBtn.disabled = on || !canFile;
   }
   function setStatus(kind, msg) {
     status.className = "status" + (kind ? " " + kind : "");
@@ -2119,60 +2124,113 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  downloadBtn.addEventListener("click", async () => {
+  function mimeForName(name, fallback) {
+    const n = (name || "").toLowerCase();
+    if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    if (n.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    if (n.endsWith(".md")) return "text/markdown";
+    return fallback || "application/octet-stream";
+  }
+
+  /** Build the current file bytes (edited export if applicable) — client-side only. */
+  async function getCurrentExportFile() {
     const structured = lastOutput === "xlsx" || lastOutput === "pptx";
-    // If the user opened the editor, export the edited model for Word/Markdown
     if (docEditor && !structured) {
-      if (lastOutput === "md" && viewMode !== "edit") {
-        // prefer original md file unless they edited
-      }
       if (API && (viewMode === "edit" || lastOutput === "docx")) {
-        try {
-          setStatus("busy", "Building edited Word file…");
-          const blocks = docEditor.getBlocks();
-          const r = await fetch(API + "/api/export/docx", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ blocks }),
-          });
-          const data = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(data.error || "Export failed");
-          const dl = data.download_url.startsWith("http")
-            ? data.download_url
-            : API + data.download_url;
-          const fileResp = await fetch(dl);
-          if (!fileResp.ok) throw new Error("Download failed");
-          const blob = await fileResp.blob();
-          triggerBlobDownload(blob, data.download_name || "lightdocs-edit.docx");
-          lastText = docEditor.getText();
-          result.textContent = lastText;
-          setStatus("ok", "Edited document downloaded.");
-          return;
-        } catch (e) {
-          setStatus("err", e.message || String(e));
-          return;
-        }
+        const blocks = docEditor.getBlocks();
+        const r = await fetch(API + "/api/export/docx", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ blocks }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || "Export failed");
+        const dl = data.download_url.startsWith("http")
+          ? data.download_url
+          : API + data.download_url;
+        const fileResp = await fetch(dl);
+        if (!fileResp.ok) throw new Error("Could not fetch exported file");
+        const blob = await fileResp.blob();
+        const name = data.download_name || "lightdocs-edit.docx";
+        lastText = docEditor.getText();
+        result.textContent = lastText;
+        return {
+          blob,
+          name,
+          file: new File([blob], name, { type: mimeForName(name, blob.type) })
+        };
       }
       if (lastOutput === "md" || !API) {
         const text = docEditor.getText();
+        const name = "lightdocs-edit.md";
         const blob = new Blob([text + "\n"], { type: "text/markdown;charset=utf-8" });
-        triggerBlobDownload(blob, "lightdocs-edit.md");
-        setStatus("ok", "Markdown downloaded.");
-        return;
+        return { blob, name, file: new File([blob], name, { type: "text/markdown" }) };
       }
     }
-    if (!lastDownloadUrl) {
-      setStatus("err", "Nothing to download yet.");
-      return;
+    if (!lastDownloadUrl) throw new Error("Nothing to send yet — generate a document first.");
+    const resp = await fetch(lastDownloadUrl);
+    if (!resp.ok) throw new Error("Could not fetch the file to share.");
+    const blob = await resp.blob();
+    const name = lastDownloadName || ("lightdocs." + (lastOutput || "bin"));
+    return {
+      blob,
+      name,
+      file: new File([blob], name, { type: mimeForName(name, blob.type) })
+    };
+  }
+
+  function canNativeShareFile(file) {
+    try {
+      if (!navigator.share) return false;
+      if (typeof navigator.canShare === "function") {
+        return navigator.canShare({ files: [file] });
+      }
+      // Older Safari may share without canShare — try files only if supported
+      return false;
+    } catch (_) {
+      return false;
     }
-    const a = document.createElement("a");
-    a.href = lastDownloadUrl;
-    a.download = lastDownloadName;
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setStatus("ok", "Download started.");
+  }
+
+  downloadBtn.addEventListener("click", async () => {
+    try {
+      setStatus("busy", "Preparing download…");
+      const out = await getCurrentExportFile();
+      triggerBlobDownload(out.blob, out.name);
+      setStatus("ok", "Download started.");
+    } catch (e) {
+      setStatus("err", e.message || String(e));
+    }
+  });
+
+  sendBtn?.addEventListener("click", async () => {
+    try {
+      setStatus("busy", "Preparing file to send…");
+      const out = await getCurrentExportFile();
+      if (canNativeShareFile(out.file)) {
+        await navigator.share({
+          files: [out.file],
+          title: out.name,
+          text: "Shared from Lightdocs"
+        });
+        setStatus("ok", "Shared — your file stayed on this device (not uploaded to Lightdocs).");
+        return;
+      }
+      // Fallback: download + open OrcaMail for the user to attach
+      triggerBlobDownload(out.blob, out.name);
+      window.open("https://orcamail.ai", "_blank", "noopener,noreferrer");
+      setStatus(
+        "ok",
+        "Downloaded · opening OrcaMail — attach the file there. Nothing was uploaded to Lightdocs."
+      );
+    } catch (e) {
+      if (e && e.name === "AbortError") {
+        setStatus("", "Share cancelled.");
+        return;
+      }
+      setStatus("err", e.message || String(e));
+    }
   });
 })();
 </script>

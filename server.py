@@ -183,6 +183,32 @@ STYLE_PROMPTS = {
 }
 
 
+_TELEMETRY_RE = re.compile(
+    r"\{[^{}]*\"(?:promptTokens|evalTokens|tokensPerSecond|totalMs)\"[^{}]*\}"
+)
+
+
+def _strip_aivm_noise(text: str) -> str:
+    """Drop AIVM chatter/telemetry that is not document content."""
+    t = _TELEMETRY_RE.sub("", text or "")
+    # common wrapper lines
+    drop_prefixes = (
+        "here is the output",
+        "here's the output",
+        "i hope this helps",
+        "let me know if",
+        "sure,",
+        "of course,",
+    )
+    lines = []
+    for ln in t.splitlines():
+        low = ln.strip().lower()
+        if any(low.startswith(p) for p in drop_prefixes):
+            continue
+        lines.append(ln)
+    return "\n".join(lines).strip()
+
+
 def parse_lightdocs_payload(raw: str) -> tuple[str, dict[str, Any]]:
     """Split AIVM output into markdown + optional ```lightdocs JSON block."""
     meta: dict[str, Any] = {}
@@ -196,63 +222,74 @@ def parse_lightdocs_payload(raw: str) -> tuple[str, dict[str, Any]]:
                 meta = {}
         except Exception:
             meta = {}
-    # also accept bare trailing JSON object with charts/sheets/slides
+    # also accept bare JSON object with charts/sheets/slides anywhere
     if not meta:
-        m2 = re.search(r"(\{\s*\"(?:charts|sheets|slides)\"[\s\S]*\})\s*$", raw)
+        m2 = re.search(
+            r"(\{\s*\"(?:charts|sheets|slides)\"\s*:\s*\[[\s\S]*?\]\s*\})", raw
+        )
         if m2:
             try:
                 meta = json.loads(m2.group(1))
-                md = raw[: m2.start()].strip()
+                md = (raw[: m2.start()] + raw[m2.end() :]).strip()
             except Exception:
                 pass
+    md = _strip_aivm_noise(md)
     return md, meta
 
 
 def build_prompt(raw: str, style: str, output: str) -> str:
     voice = STYLE_PROMPTS.get(style, STYLE_PROMPTS["plain"])
+    ground = (
+        "CRITICAL: Use ONLY the INPUT below. Do not invent facts. "
+        "Do not write about Lightchain, SDKs, APIs, or unrelated topics. "
+        "No preamble, no apologies, no 'here is the output', no token stats."
+    )
     if output == "xlsx":
-        return f"""You are Lightdocs. Turn the input into spreadsheet data.
+        return f"""You are Lightdocs, a document formatter.
 
 {voice}
+{ground}
 
-Return ONLY a fenced block:
+Task: turn INPUT into spreadsheet JSON.
+Return ONLY this fenced block and nothing else:
 ```lightdocs
 {{ "sheets": [ {{ "name": "Sheet1", "columns": ["A","B"], "rows": [["x",1],["y",2]] }} ] }}
 ```
-Use real numbers/labels from the input. If input is not tabular, make one sheet with a single Notes column listing the points.
-Do not invent data.
+Use real numbers/labels from INPUT. If INPUT is not tabular, one sheet with a Notes column listing the points.
 
 INPUT:
 {raw[:12000]}
 """
     if output == "pptx":
-        return f"""You are Lightdocs. Turn the input into a short slide deck outline.
+        return f"""You are Lightdocs, a document formatter.
 
 {voice}
+{ground}
 
-Return ONLY a fenced block:
+Task: turn INPUT into a short slide outline.
+Return ONLY this fenced block and nothing else:
 ```lightdocs
 {{ "slides": [ {{ "title": "Overview", "bullets": ["Point A","Point B"], "notes": "" }} ] }}
 ```
-5–10 slides max. Preserve facts; do not invent.
+5–10 slides max. Titles + bullets from INPUT only.
 
 INPUT:
 {raw[:12000]}
 """
     # docx / md — prose + optional charts
-    return f"""You are Lightdocs on Lightchain. Turn messy notes into clean document Markdown.
+    return f"""You are Lightdocs, a document formatter. Turn messy notes into clean Markdown.
 
 {voice}
+{ground}
 
 Rules:
-- Output clean Markdown (headings, bullets, short paragraphs). No AI preamble.
-- Preserve facts; do not invent names, dates, or numbers.
-- Title with a short H1.
-- If the notes contain clear numeric data worth charting, ALSO append a fenced block:
+- Output clean Markdown only (H1 title, headings, bullets, short paragraphs).
+- Every section must come from INPUT NOTES. Stay on that topic.
+- If INPUT NOTES include clear numeric series worth charting, append ONE fenced block after the Markdown:
 ```lightdocs
 {{ "charts": [ {{ "type": "bar|line|pie", "title": "...", "labels": ["A","B"], "values": [1,2], "x_label": "", "y_label": "" }} ] }}
 ```
-Supported chart types only: bar, line, pie. If no chartable data, omit the block.
+Supported chart types: bar, line, pie. If no chartable numbers, omit the block.
 
 INPUT NOTES:
 {raw[:12000]}
@@ -539,13 +576,21 @@ def process_job(
             path = DATA_DIR / fname
             build_xlsx(meta, md, path)
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            text_out = md.strip() or json.dumps(meta.get("sheets") or [], indent=2)
+            text_out = (
+                json.dumps(meta.get("sheets") or [], indent=2)
+                if meta.get("sheets")
+                else md.strip()
+            )
         elif output == "pptx":
             fname = f"lightdocs-{job_id[:8]}.pptx"
             path = DATA_DIR / fname
             build_pptx(meta, md, path)
             mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            text_out = md.strip() or json.dumps(meta.get("slides") or [], indent=2)
+            text_out = (
+                json.dumps(meta.get("slides") or [], indent=2)
+                if meta.get("slides")
+                else md.strip()
+            )
         else:
             output = "docx"
             fname = f"lightdocs-{job_id[:8]}.docx"

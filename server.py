@@ -45,18 +45,40 @@ CORS(app, origins=CORS_ORIGINS, supports_credentials=False)
 
 _jobs_lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
+_META_DIR = DATA_DIR / "meta"
+_META_DIR.mkdir(parents=True, exist_ok=True)
 
 
-@dataclass
-class JobState:
-    id: str
-    status: str = "queued"  # queued|ocr|aivm|building|done|error
-    step: str = "Queued"
-    created: float = field(default_factory=time.time)
-    error: Optional[str] = None
-    text_out: Optional[str] = None
-    download_name: Optional[str] = None
-    docx_path: Optional[str] = None
+def _job_meta_path(job_id: str) -> Path:
+    return _META_DIR / f"{job_id}.json"
+
+
+def _save_job(job_id: str, job: dict[str, Any]) -> None:
+    """Persist job meta to disk so Railway restarts don't lose in-flight/done jobs."""
+    try:
+        import json
+
+        _job_meta_path(job_id).write_text(json.dumps(job), encoding="utf-8")
+    except Exception as e:
+        print(f"[job] meta save failed: {e}")
+
+
+def _load_job(job_id: str) -> Optional[dict[str, Any]]:
+    import json
+
+    with _jobs_lock:
+        if job_id in _jobs:
+            return _jobs[job_id]
+    p = _job_meta_path(job_id)
+    if not p.is_file():
+        return None
+    try:
+        job = json.loads(p.read_text(encoding="utf-8"))
+        with _jobs_lock:
+            _jobs[job_id] = job
+        return job
+    except Exception:
+        return None
 
 
 def _utcnow() -> str:
@@ -66,7 +88,7 @@ def _utcnow() -> str:
 def _cleanup_expired() -> None:
     now = time.time()
     with _jobs_lock:
-        dead = [jid for jid, j in _jobs.items() if now - j["created"] > JOB_TTL_SECONDS]
+        dead = [jid for jid, j in _jobs.items() if now - j.get("created", now) > JOB_TTL_SECONDS]
         for jid in dead:
             path = _jobs[jid].get("docx_path")
             if path and Path(path).is_file():
@@ -74,7 +96,24 @@ def _cleanup_expired() -> None:
                     Path(path).unlink()
                 except OSError:
                     pass
+            try:
+                _job_meta_path(jid).unlink(missing_ok=True)
+            except OSError:
+                pass
             _jobs.pop(jid, None)
+    # also sweep meta dir
+    for p in _META_DIR.glob("*.json"):
+        try:
+            import json
+
+            job = json.loads(p.read_text(encoding="utf-8"))
+            if now - float(job.get("created", 0)) > JOB_TTL_SECONDS:
+                doc = job.get("docx_path")
+                if doc and Path(doc).is_file():
+                    Path(doc).unlink(missing_ok=True)
+                p.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def ocr_image_bytes(data: bytes) -> str:
@@ -181,11 +220,12 @@ def markdown_to_docx(md: str, path: Path) -> None:
 
 
 def process_job(job_id: str, text: str, images: list[bytes], style: str) -> None:
-    def set_step(status: str, step: str) -> None:
+    def set_step(status: str, step: str, **extra: Any) -> None:
         with _jobs_lock:
-            if job_id in _jobs:
-                _jobs[job_id]["status"] = status
-                _jobs[job_id]["step"] = step
+            job = _jobs.get(job_id) or {}
+            job.update({"status": status, "step": step, **extra})
+            _jobs[job_id] = job
+            _save_job(job_id, job)
 
     try:
         set_step("ocr", "Reading images (OCR)…")
@@ -213,24 +253,17 @@ def process_job(job_id: str, text: str, images: list[bytes], style: str) -> None
         path = DATA_DIR / fname
         markdown_to_docx(out, path)
 
-        with _jobs_lock:
-            if job_id in _jobs:
-                _jobs[job_id].update(
-                    {
-                        "status": "done",
-                        "step": "Done — download ready. We don’t keep your docs long.",
-                        "text_out": out,
-                        "download_name": fname,
-                        "docx_path": str(path),
-                    }
-                )
+        set_step(
+            "done",
+            "Done — download ready. We don’t keep your docs long.",
+            text_out=out,
+            download_name=fname,
+            docx_path=str(path),
+            error=None,
+        )
     except Exception as e:
         print(f"[job {job_id}] error: {e}")
-        with _jobs_lock:
-            if job_id in _jobs:
-                _jobs[job_id].update(
-                    {"status": "error", "step": "Failed", "error": str(e)[:400]}
-                )
+        set_step("error", "Failed", error=str(e)[:400])
 
 
 @app.get("/api/health")
@@ -288,19 +321,21 @@ def create_job():
         return jsonify({"error": "Provide text and/or at least one image"}), 400
 
     job_id = uuid.uuid4().hex
+    job = {
+        "id": job_id,
+        "status": "queued",
+        "step": "Queued",
+        "created": time.time(),
+        "error": None,
+        "text_out": None,
+        "download_name": None,
+        "docx_path": None,
+        "mode": mode,
+        "style": style,
+    }
     with _jobs_lock:
-        _jobs[job_id] = {
-            "id": job_id,
-            "status": "queued",
-            "step": "Queued",
-            "created": time.time(),
-            "error": None,
-            "text_out": None,
-            "download_name": None,
-            "docx_path": None,
-            "mode": mode,
-            "style": style,
-        }
+        _jobs[job_id] = job
+        _save_job(job_id, job)
 
     t = threading.Thread(
         target=process_job, args=(job_id, text, images, style), daemon=True
@@ -319,8 +354,7 @@ def create_job():
 @app.get("/api/jobs/<job_id>")
 def get_job(job_id: str):
     _cleanup_expired()
-    with _jobs_lock:
-        job = _jobs.get(job_id)
+    job = _load_job(job_id)
     if not job:
         return jsonify({"error": "Job not found or expired"}), 404
     out = {
@@ -341,8 +375,7 @@ def get_job(job_id: str):
 @app.get("/api/jobs/<job_id>/download")
 def download_job(job_id: str):
     _cleanup_expired()
-    with _jobs_lock:
-        job = _jobs.get(job_id)
+    job = _load_job(job_id)
     if not job or job["status"] != "done":
         return jsonify({"error": "Not ready or expired"}), 404
     path = job.get("docx_path")

@@ -24,7 +24,27 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
+
+VALID_MODES = frozenset(
+    {
+        "notes-word",
+        "notes-to-word",
+        "meeting",
+        "resume",
+        "invoice",
+        "sop",
+        "study",
+        "sheet",
+        "deck",
+        "explain",
+        "rewrite",
+        "condition",
+        "dao",
+        "litepaper",
+        "announce",
+    }
+)
 
 AIVM_RELAY = os.environ.get(
     "AIVM_RELAY", "https://web-production-aaaba.up.railway.app"
@@ -237,61 +257,194 @@ def parse_lightdocs_payload(raw: str) -> tuple[str, dict[str, Any]]:
     return md, meta
 
 
-def build_prompt(raw: str, style: str, output: str) -> str:
-    voice = STYLE_PROMPTS.get(style, STYLE_PROMPTS["plain"])
-    ground = (
-        "CRITICAL: Use ONLY the INPUT below. Do not invent facts. "
-        "Do not write about Lightchain, SDKs, APIs, or unrelated topics. "
-        "No preamble, no apologies, no 'here is the output', no token stats."
+MODE_TASKS: dict[str, str] = {
+    "notes-word": (
+        "Turn messy notes into a clean document: short H1 title, headings, bullets, "
+        "and short paragraphs. Preserve facts from INPUT only."
+    ),
+    "notes-to-word": (
+        "Turn messy notes into a clean document: short H1 title, headings, bullets, "
+        "and short paragraphs. Preserve facts from INPUT only."
+    ),
+    "meeting": (
+        "Turn messy meeting notes into: (1) Meeting title + meta if present, "
+        "(2) Concise summary, (3) Decisions, (4) Action items as a checklist with "
+        "Owner — Task — Due when present (use [TO FILL] if owner/due missing). "
+        "Do not invent attendees or commitments."
+    ),
+    "resume": (
+        "Build a structured resume/CV OR a cover letter from INPUT. "
+        "If INPUT looks like a role + notes, prefer a cover letter; otherwise a resume "
+        "with Contact, Summary, Experience, Education, Skills. Use [TO FILL] for missing "
+        "contact details — never invent employers, dates, or credentials."
+    ),
+    "invoice": (
+        "Draft an invoice or quote: seller/buyer placeholders, invoice/quote number "
+        "[TO FILL], date, line items (description, qty, unit price, line total), "
+        "subtotal, tax if mentioned, total. Currency from INPUT or mark [TO FILL]. "
+        "Do not invent prices."
+    ),
+    "sop": (
+        "Turn rough steps into a clear SOP or checklist: purpose, prerequisites, "
+        "numbered procedure steps, and a final checkbox verification list. "
+        "Keep steps actionable; mark unknowns as [TO FILL]."
+    ),
+    "study": (
+        "Build a study guide / lesson outline from INPUT: learning objectives, "
+        "outline of topics, key terms with short definitions, and review questions. "
+        "Stay on the subject in INPUT."
+    ),
+    "sheet": (
+        "Shape INPUT as spreadsheet data: infer sensible columns and rows from the notes. "
+        "Prefer real numbers/labels from INPUT; do not invent metrics."
+    ),
+    "deck": (
+        "Turn INPUT into a short presentation outline: 5–10 slides with titles and "
+        "tight bullets. One idea per slide; preserve facts from INPUT only."
+    ),
+    "explain": (
+        "Scan & explain: give a plain-language explanation of what the INPUT document "
+        "or notes mean. Structure as Overview, Key points, What to do next. "
+        "If quoting, keep short and clearly marked. Do not invent content not in INPUT."
+    ),
+    "rewrite": (
+        "Rewrite / simplify / translate the INPUT text in the requested voice. "
+        "Preserve meaning and facts; improve clarity. If INPUT asks for a language, "
+        "translate into that language; otherwise rewrite in the voice style."
+    ),
+    "condition": (
+        "Create a property condition / move-in report from notes/photo OCR: "
+        "Property/unit [TO FILL], date, rooms/areas with condition notes, issues found, "
+        "photos referenced by filename if present, and a signature/ack placeholder. "
+        "Do not invent damage that is not in INPUT."
+    ),
+    "dao": (
+        "Draft a Lightchain LCAI DUNA governor proposal from rough notes. Match real "
+        "Lightchain proposal structure EXACTLY with these sections in order:\n"
+        "1) Title — [Verb] [Subject], plain and specific (no hype)\n"
+        "2) Summary — 1–2 sentences of what is authorized, including headline numbers\n"
+        "3) Key terms — bullets for amounts, rates, counterparties, duration\n"
+        "4) Why it matters / rationale — short paragraph\n"
+        "5) Scope & limitations — what this does NOT authorize\n"
+        "6) What this means / effect if passed — bullets\n"
+        "7) Governance / execution footer — voting-window note + placeholders for "
+        "on-chain record and dao.lightchain.ai link\n"
+        "House style: sober, transparent, DUNA framing (LCAI DUNA; Administrator "
+        "Quantum Counsel LLC when relevant). NEVER invent tx hashes, proposal IDs, "
+        "treasury balances, or vote results — use [TO FILL]."
+    ),
+    "litepaper": (
+        "Write a Lightchain-oriented litepaper / one-pager from INPUT: Title, Hook, "
+        "Problem, Solution, How it works, Token/utility if mentioned, Roadmap, "
+        "Call to action. Keep it one-page dense. No invented tokenomics numbers."
+    ),
+    "announce": (
+        "Write a Forum / Discord announcement in Lightchain community style: short, "
+        "scannable, with emoji section markers (e.g. 🚀 🚨 🧠 ⏳ 🗳️) where natural, "
+        "clear CTA, and link placeholders as [TO FILL]. Do not invent proposal IDs "
+        "or tx hashes."
+    ),
+}
+
+
+def _format_instructions(output: str, mode: str) -> str:
+    """How the model should shape the reply for the chosen download format."""
+    charts = (
+        "If INPUT has clear numeric series worth charting, you may include "
+        '```lightdocs\n{"charts":[{"type":"bar|line|pie","title":"...","labels":["A"],'
+        '"values":[1],"x_label":"","y_label":""}]}\n``` '
+        "(bar/line/pie only)."
     )
     if output == "xlsx":
-        return f"""You are Lightdocs, a document formatter.
-
-{voice}
-{ground}
-
-Task: turn INPUT into spreadsheet JSON.
-Return ONLY this fenced block and nothing else:
-```lightdocs
-{{ "sheets": [ {{ "name": "Sheet1", "columns": ["A","B"], "rows": [["x",1],["y",2]] }} ] }}
-```
-Use real numbers/labels from INPUT. If INPUT is not tabular, one sheet with a Notes column listing the points.
-
-INPUT:
-{raw[:12000]}
-"""
+        return (
+            "Return ONLY a fenced block (nothing else):\n"
+            "```lightdocs\n"
+            '{ "sheets": [ { "name": "Sheet1", "columns": ["A","B"], '
+            '"rows": [["x",1],["y",2]] } ] }\n'
+            "```\n"
+            "Optional: add a sibling \"charts\" array in the same JSON for native Excel charts.\n"
+            "If INPUT is not tabular, one Notes column listing the points."
+        )
     if output == "pptx":
-        return f"""You are Lightdocs, a document formatter.
+        return (
+            "Return ONLY a fenced block (nothing else):\n"
+            "```lightdocs\n"
+            '{ "slides": [ { "title": "Overview", "bullets": ["Point A","Point B"], '
+            '"notes": "" } ] }\n'
+            "```\n"
+            "Optional: include a \"charts\" array in the same JSON for a chart slide."
+        )
+    if mode == "sheet":
+        return (
+            "Output clean Markdown with a readable table of the data (no preamble). "
+            + charts
+        )
+    if mode == "deck":
+        return (
+            "Output clean Markdown: each slide as ## Title plus bullets (no preamble). "
+            + charts
+        )
+    return "Output clean Markdown only (no preamble). " + charts
 
+
+
+def build_prompt(
+    raw: str,
+    style: str,
+    output: str,
+    mode: str = "notes-word",
+    extras: Optional[dict[str, Any]] = None,
+) -> str:
+    extras = extras or {}
+    mode = mode if mode in VALID_MODES else "notes-word"
+    if mode == "notes-to-word":
+        mode = "notes-word"
+    voice = STYLE_PROMPTS.get(style, STYLE_PROMPTS["plain"])
+    lightchain_ok = mode in ("dao", "litepaper", "announce")
+    ground = (
+        "CRITICAL: Use ONLY the INPUT below. Do not invent facts. "
+        "No preamble, no apologies, no 'here is the output', no token stats. "
+    )
+    if lightchain_ok:
+        ground += "Lightchain/DAO framing is appropriate for this mode. "
+    else:
+        ground += (
+            "Do not write about Lightchain SDKs, APIs, or unrelated platform topics. "
+        )
+
+    task = MODE_TASKS.get(mode, MODE_TASKS["notes-word"])
+    extra_bits = []
+    if mode == "dao":
+        ptype = str(extras.get("prop_type") or "general")
+        extra_bits.append(f"Proposal type hint: {ptype}.")
+        if extras.get("forum_wrap"):
+            extra_bits.append(
+                "AFTER the seven proposal sections, also append a Forum/Discord "
+                "announcement wrapper of the same content with emoji section headers "
+                "and a Review-and-vote CTA + [TO FILL] link (default wrapper is OFF "
+                "unless requested — it is requested now)."
+            )
+        else:
+            extra_bits.append(
+                "Do NOT wrap as a forum announcement; emit the proposal body only."
+            )
+
+    fmt = _format_instructions(output, mode)
+    extra = ("\n".join(extra_bits) + "\n") if extra_bits else ""
+
+    return f"""You are Lightdocs, a document formatter.
+
+Mode: {mode}
 {voice}
 {ground}
 
-Task: turn INPUT into a short slide outline.
-Return ONLY this fenced block and nothing else:
-```lightdocs
-{{ "slides": [ {{ "title": "Overview", "bullets": ["Point A","Point B"], "notes": "" }} ] }}
-```
-5–10 slides max. Titles + bullets from INPUT only.
+Task:
+{task}
+{extra}
+Output shaping:
+{fmt}
 
 INPUT:
-{raw[:12000]}
-"""
-    # docx / md — prose + optional charts
-    return f"""You are Lightdocs, a document formatter. Turn messy notes into clean Markdown.
-
-{voice}
-{ground}
-
-Rules:
-- Output clean Markdown only (H1 title, headings, bullets, short paragraphs).
-- Every section must come from INPUT NOTES. Stay on that topic.
-- If INPUT NOTES include clear numeric series worth charting, append ONE fenced block after the Markdown:
-```lightdocs
-{{ "charts": [ {{ "type": "bar|line|pie", "title": "...", "labels": ["A","B"], "values": [1,2], "x_label": "", "y_label": "" }} ] }}
-```
-Supported chart types: bar, line, pie. If no chartable numbers, omit the block.
-
-INPUT NOTES:
 {raw[:12000]}
 """
 
@@ -521,7 +674,13 @@ def build_pptx(meta: dict[str, Any], fallback_md: str, path: Path) -> None:
 
 
 def process_job(
-    job_id: str, text: str, images: list[bytes], style: str, output: str
+    job_id: str,
+    text: str,
+    images: list[bytes],
+    style: str,
+    output: str,
+    mode: str = "notes-word",
+    extras: Optional[dict[str, Any]] = None,
 ) -> None:
     def set_step(status: str, step: str, **extra: Any) -> None:
         with _jobs_lock:
@@ -530,6 +689,7 @@ def process_job(
             _jobs[job_id] = job
             _save_job(job_id, job)
 
+    extras = extras or {}
     chart_pngs: list[tuple[str, Path]] = []
     try:
         set_step("ocr", "Reading images (OCR)…")
@@ -546,13 +706,21 @@ def process_job(
         if not combined:
             raise RuntimeError("No text found — paste notes or use a clearer photo.")
 
-        set_step("aivm", "AIVM drafting (may take 1–2 min)…")
-        raw_out = aivm_infer(build_prompt(combined, style, output))
+        set_step("aivm", f"AIVM drafting ({mode})…")
+        raw_out = aivm_infer(build_prompt(combined, style, output, mode, extras))
         if not raw_out or len(raw_out) < 4:
             raise RuntimeError("AIVM returned empty output — try again.")
         md, meta = parse_lightdocs_payload(raw_out)
         if not md.strip() and output in ("docx", "md"):
-            md = raw_out
+            md = _strip_aivm_noise(raw_out)
+
+        # mode defaults: sheet→xlsx builder path if sheets present even when md empty
+        if mode == "sheet" and output not in ("xlsx", "pptx") and meta.get("sheets"):
+            # keep user's output; markdown_to_docx/md will use md or a simple dump
+            if not md.strip():
+                md = json.dumps(meta.get("sheets"), indent=2)
+        if mode == "deck" and output not in ("pptx",) and meta.get("slides") and not md.strip():
+            md = json.dumps(meta.get("slides"), indent=2)
 
         set_step("building", f"Building {output} file…")
         # charts for docx
@@ -625,9 +793,16 @@ def health():
             "aivm_relay_configured": bool(AIVM_RELAY),
             "retention_seconds": JOB_TTL_SECONDS,
             "formats": ["docx", "md", "xlsx", "pptx"],
+            "modes": sorted(m for m in VALID_MODES if m != "notes-to-word"),
             "privacy": "Uploads processed for the job only; files auto-expire. We don’t keep your docs. Drafts stay on your device only.",
         }
     )
+
+
+def _truthy(val: Any) -> bool:
+    if isinstance(val, bool):
+        return val
+    return str(val or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 @app.post("/api/jobs")
@@ -636,6 +811,9 @@ def create_job():
     style = "plain"
     text = ""
     output = "docx"
+    mode = "notes-word"
+    prop_type = "general"
+    forum_wrap = False
     images: list[bytes] = []
 
     if request.content_type and "multipart/form-data" in request.content_type:
@@ -643,6 +821,8 @@ def create_job():
         style = (request.form.get("style") or "plain").strip()
         output = (request.form.get("output") or request.form.get("outfmt") or "docx").strip()
         mode = (request.form.get("mode") or "notes-word").strip()
+        prop_type = (request.form.get("prop_type") or request.form.get("propType") or "general").strip()
+        forum_wrap = _truthy(request.form.get("forum_wrap") or request.form.get("forumWrap"))
         for key in ("images", "image", "files"):
             for f in request.files.getlist(key):
                 if f and f.filename:
@@ -655,6 +835,8 @@ def create_job():
         style = (body.get("style") or "plain").strip()
         output = (body.get("output") or body.get("outfmt") or "docx").strip()
         mode = (body.get("mode") or "notes-word").strip()
+        prop_type = str(body.get("prop_type") or body.get("propType") or "general").strip()
+        forum_wrap = _truthy(body.get("forum_wrap") or body.get("forumWrap"))
         for b64 in body.get("images") or []:
             try:
                 import base64
@@ -666,12 +848,17 @@ def create_job():
 
     if output not in ("docx", "md", "xlsx", "pptx"):
         output = "docx"
-    if mode not in ("notes-word", "notes-to-word", "meeting"):
+    if mode not in VALID_MODES:
         mode = "notes-word"
+    if mode == "notes-to-word":
+        mode = "notes-word"
+    if prop_type not in ("general", "treasury", "param", "signal", "grant"):
+        prop_type = "general"
 
     if not text and not images:
         return jsonify({"error": "Provide text and/or at least one image"}), 400
 
+    extras = {"prop_type": prop_type, "forum_wrap": forum_wrap}
     job_id = uuid.uuid4().hex
     job = {
         "id": job_id,
@@ -687,13 +874,16 @@ def create_job():
         "mode": mode,
         "style": style,
         "output": output,
+        "extras": extras,
     }
     with _jobs_lock:
         _jobs[job_id] = job
         _save_job(job_id, job)
 
     threading.Thread(
-        target=process_job, args=(job_id, text, images, style, output), daemon=True
+        target=process_job,
+        args=(job_id, text, images, style, output, mode, extras),
+        daemon=True,
     ).start()
     return jsonify(
         {
@@ -702,6 +892,7 @@ def create_job():
             "poll_url": f"/api/jobs/{job_id}",
             "retention_seconds": JOB_TTL_SECONDS,
             "output": output,
+            "mode": mode,
         }
     ), 202
 
@@ -724,6 +915,7 @@ def get_job(job_id: str):
             ),
             "download_name": job.get("download_name"),
             "output": job.get("output"),
+            "mode": job.get("mode"),
             "privacy": "We don’t keep your docs — downloads expire automatically. Drafts stay on your device only.",
         }
     )

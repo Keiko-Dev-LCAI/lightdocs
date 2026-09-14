@@ -70,6 +70,17 @@
   }
   textarea { min-height: 150px; resize: vertical; }
   .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .row-3 { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  @media (min-width: 720px) {
+    .row-3 { grid-template-columns: 1.4fr 1fr 1fr; }
+  }
+  .dao-only { display: none; margin-top: 12px; }
+  body.mode-dao .dao-only { display: block; }
+  .check-row {
+    display: flex; align-items: flex-start; gap: 10px; margin-top: 10px;
+    font-size: 13px; color: var(--text2); font-weight: 600;
+  }
+  .check-row input { width: 18px; height: 18px; min-height: 0; margin-top: 2px; flex-shrink: 0; }
   .file-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -148,7 +159,34 @@
 
       <div class="col">
         <div class="card">
-          <div class="row-2">
+          <div class="row-3">
+            <div>
+              <label class="field" for="mode">What do you want to do?</label>
+              <select id="mode" aria-label="Mode">
+                <optgroup label="Create doc">
+                  <option value="notes-word" selected>Notes → Word report</option>
+                  <option value="meeting">Meeting notes → summary + actions</option>
+                  <option value="resume">Resume / CV / cover letter</option>
+                  <option value="invoice">Invoice / quote</option>
+                  <option value="sop">SOP / checklist</option>
+                  <option value="study">Study guide / lesson outline</option>
+                  <option value="sheet">Spreadsheet</option>
+                  <option value="deck">Presentation</option>
+                </optgroup>
+                <optgroup label="Analyze">
+                  <option value="explain">Scan &amp; explain a document</option>
+                </optgroup>
+                <optgroup label="Edit / polish">
+                  <option value="rewrite">Rewrite / simplify / translate</option>
+                  <option value="condition">Condition / move-in report</option>
+                </optgroup>
+                <optgroup label="Lightchain">
+                  <option value="dao">DAO proposal draft</option>
+                  <option value="litepaper">Litepaper / one-pager</option>
+                  <option value="announce">Forum / Discord announcement</option>
+                </optgroup>
+              </select>
+            </div>
             <div>
               <label class="field" for="style">Style / voice</label>
               <select id="style">
@@ -170,11 +208,26 @@
               </select>
             </div>
           </div>
+          <div class="dao-only" id="daoExtras">
+            <label class="field" for="propType">Proposal type (optional)</label>
+            <select id="propType">
+              <option value="general" selected>Other / general</option>
+              <option value="treasury">Treasury / funding request</option>
+              <option value="param">Parameter change</option>
+              <option value="signal">Signaling / temperature check</option>
+              <option value="grant">Grant</option>
+            </select>
+            <label class="check-row">
+              <input type="checkbox" id="forumWrap">
+              <span>Also wrap as Forum/Discord announcement (emoji sections). Default off.</span>
+            </label>
+          </div>
+          <p class="hint" id="modeHint">Phone photo or paste handwritten notes → clean Word-style notes.</p>
           <p class="hint" id="outHint">Word embeds charts as images when your notes include clear numbers.</p>
         </div>
 
         <div class="card grow">
-          <label class="field" for="input">Paste or type notes</label>
+          <label class="field" for="input" id="inputLabel">Paste or type notes</label>
           <textarea id="input" placeholder="Paste messy notes, bullets, or numbers for a chart…&#10;&#10;Or take a photo of handwritten / printed notes below."></textarea>
           <div class="file-row">
             <label class="btn btn-ghost">
@@ -215,10 +268,13 @@
   const DRAFT_STORE = "projects";
   const AUTOSAVE_ID = "autosave";
 
+  const modeEl = document.getElementById("mode");
   const styleEl = document.getElementById("style");
   const outfmt = document.getElementById("outfmt");
+  const modeHint = document.getElementById("modeHint");
   const outHint = document.getElementById("outHint");
   const input = document.getElementById("input");
+  const inputLabel = document.getElementById("inputLabel");
   const images = document.getElementById("images");
   const thumbs = document.getElementById("thumbs");
   const generate = document.getElementById("generate");
@@ -232,6 +288,8 @@
   const draftList = document.getElementById("draftList");
   const saveDraftBtn = document.getElementById("saveDraftBtn");
   const refreshDraftsBtn = document.getElementById("refreshDraftsBtn");
+  const propType = document.getElementById("propType");
+  const forumWrap = document.getElementById("forumWrap");
 
   apiHint.textContent = API ? ("API " + API.replace(/^https?:\/\//, "")) : "Set LIGHTDOCS_API";
 
@@ -242,16 +300,63 @@
   let imageFiles = [];
   let activeDraftId = null;
   let autosaveTimer = null;
+  let userTouchedStyle = false;
+  let userTouchedOut = false;
 
+  const MODE_HINTS = {
+    "notes-word": "Phone photo or paste handwritten notes → clean Word-style notes.",
+    meeting: "Paste messy meeting notes → summary + action items (owner / task / due).",
+    resume: "Paste bullets / work history → resume or cover letter.",
+    invoice: "Describe the job + amounts → invoice / quote (Excel works great too).",
+    sop: "Paste rough steps → numbered SOP + checklist.",
+    study: "Paste topic or class notes → study guide with key terms + review Qs.",
+    sheet: "Describe columns / data → real spreadsheet (.xlsx).",
+    deck: "Paste an outline → real PowerPoint slides.",
+    explain: "Upload/photo or paste a doc → plain-language explanation.",
+    rewrite: "Paste text → rewrite / simplify / translate in the chosen voice.",
+    condition: "Photos + notes → move-in / condition report.",
+    dao: "Paste a rough idea → Lightchain governor-shaped DAO proposal. Draft only — no on-chain submit.",
+    litepaper: "Paste project bullets → litepaper / one-pager.",
+    announce: "Paste news → Forum / Discord announcement with emoji sections."
+  };
   const OUT_HINTS = {
     docx: "Word embeds charts as images when your notes include clear numbers.",
     md: "Markdown is best for Copy / Discord / forums.",
     xlsx: "Excel expects numbers or a table — we’ll build real sheets.",
     pptx: "PowerPoint turns notes into title + bullet slides."
   };
+
+  function applyModeDefaults() {
+    const m = modeEl.value;
+    document.body.classList.toggle("mode-dao", m === "dao");
+    modeHint.textContent = MODE_HINTS[m] || "";
+    if (m === "dao") {
+      inputLabel.textContent = "Proposal idea (paste / type)";
+      if (!userTouchedStyle) styleEl.value = "formal";
+      if (!userTouchedOut) outfmt.value = "md";
+    } else if (m === "announce" || m === "litepaper") {
+      inputLabel.textContent = "Paste or type notes";
+      if (!userTouchedOut) outfmt.value = "md";
+      if (!userTouchedStyle) styleEl.value = "plain";
+    } else if (m === "sheet") {
+      inputLabel.textContent = "Paste or type notes";
+      if (!userTouchedOut) outfmt.value = "xlsx";
+    } else if (m === "deck") {
+      inputLabel.textContent = "Paste or type notes";
+      if (!userTouchedOut) outfmt.value = "pptx";
+    } else {
+      inputLabel.textContent = "Paste or type notes";
+      if (!userTouchedOut) outfmt.value = (m === "explain" || m === "rewrite") ? "md" : "docx";
+    }
+    outHint.textContent = OUT_HINTS[outfmt.value] || "";
+  }
+  modeEl.addEventListener("change", () => { applyModeDefaults(); queueAutosave(); });
+  styleEl.addEventListener("change", () => { userTouchedStyle = true; });
   outfmt.addEventListener("change", () => {
+    userTouchedOut = true;
     outHint.textContent = OUT_HINTS[outfmt.value] || "";
   });
+  applyModeDefaults();
 
   function setBusy(on) {
     generate.disabled = on;
@@ -326,8 +431,11 @@
       id: id || ("draft_" + Date.now().toString(36)),
       name: (name || draftName.value || "Untitled draft").trim() || "Untitled draft",
       text: input.value || "",
+      mode: modeEl.value,
       style: styleEl.value,
       output: outfmt.value,
+      propType: propType.value,
+      forumWrap: !!forumWrap.checked,
       resultText: lastText || "",
       updatedAt: Date.now(),
       images: images,
@@ -368,7 +476,8 @@
         "<strong></strong><div class=\"draft-meta\"></div><div class=\"draft-actions\"></div>";
       el.querySelector("strong").textContent = d.name || "Untitled";
       el.querySelector(".draft-meta").textContent =
-        when + " · " + (d.output || "docx") + (d.id === activeDraftId ? " · open" : "");
+        when + " · " + (d.mode || "notes-word") + " · " + (d.output || "docx")
+        + (d.id === activeDraftId ? " · open" : "");
       const actions = el.querySelector(".draft-actions");
       const openBtn = document.createElement("button");
       openBtn.className = "btn btn-ghost btn-sm";
@@ -406,8 +515,15 @@
     activeDraftId = d.id;
     draftName.value = d.name || "";
     input.value = d.text || "";
+    userTouchedStyle = true;
+    userTouchedOut = true;
+    if (d.mode) modeEl.value = d.mode;
     if (d.style) styleEl.value = d.style;
     if (d.output) outfmt.value = d.output;
+    if (d.propType) propType.value = d.propType;
+    forumWrap.checked = !!d.forumWrap;
+    document.body.classList.toggle("mode-dao", modeEl.value === "dao");
+    modeHint.textContent = MODE_HINTS[modeEl.value] || "";
     outHint.textContent = OUT_HINTS[outfmt.value] || "";
     lastText = d.resultText || "";
     result.textContent = lastText || "Result text shows here for Copy. Download delivers the real file.";
@@ -442,6 +558,8 @@
   input.addEventListener("input", queueAutosave);
   styleEl.addEventListener("change", queueAutosave);
   outfmt.addEventListener("change", queueAutosave);
+  propType.addEventListener("change", queueAutosave);
+  forumWrap.addEventListener("change", queueAutosave);
 
   images.addEventListener("change", () => {
     imageFiles = Array.from(images.files || []);
@@ -510,8 +628,12 @@
       const auto = all.find((d) => d.id === AUTOSAVE_ID);
       if (auto && !(input.value || "").trim()) {
         input.value = auto.text || "";
+        if (auto.mode) modeEl.value = auto.mode;
         if (auto.style) styleEl.value = auto.style;
         if (auto.output) outfmt.value = auto.output;
+        if (auto.propType) propType.value = auto.propType;
+        forumWrap.checked = !!auto.forumWrap;
+        applyModeDefaults();
       }
     } catch (_) {}
 
@@ -548,10 +670,12 @@
     setStatus("busy", "Starting job…");
     try {
       const fd = new FormData();
-      fd.append("mode", "notes-word");
+      fd.append("mode", modeEl.value);
       fd.append("style", styleEl.value);
       fd.append("output", outfmt.value);
       fd.append("text", text);
+      fd.append("prop_type", propType.value);
+      fd.append("forum_wrap", forumWrap.checked ? "1" : "0");
       imageFiles.slice(0, 5).forEach((f) => fd.append("images", f, f.name || "note.jpg"));
       const r = await fetch(API + "/api/jobs", { method: "POST", body: fd });
       const data = await r.json().catch(() => ({}));

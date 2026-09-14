@@ -404,12 +404,19 @@
     .mic-btn.listening .mic-dot { animation: none; }
   }
   .generate-wrap { margin-top: auto; flex-shrink: 0; }
-  /* Desktop: equal-height columns fill the workspace; Generate stays at bottom of middle col */
+  /* Desktop: column scrolls under a sticky Generate (do not clip the primary action) */
   @media (min-width: 960px) {
-    .col { overflow: hidden; }
+    .col { overflow-y: auto; overflow-x: hidden; }
     .result-toolbar, .status, .actions, .hint { flex-shrink: 0; }
+    .generate-wrap {
+      position: sticky;
+      bottom: 0;
+      z-index: 5;
+      padding-top: 10px;
+      background: linear-gradient(180deg, transparent, var(--bg) 30%);
+    }
   }
-  /* Phone: single-column stack + sticky Generate */
+  /* Phone: single-column stack + sticky Generate (unchanged) */
   @media (max-width: 719px) {
     body { padding: 10px 12px; padding-bottom: max(72px, env(safe-area-inset-bottom)); }
     .shell { width: 100%; max-width: 100%; gap: 10px; }

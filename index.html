@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#5B4BFF">
+<title>Lightdocs — Notes → Word</title>
+<style>
+  :root {
+    --lc-primary: #5B4BFF;
+    --lc-secondary: #DD00AC;
+    --lc-dark: #14152C;
+    --lc-light: #CCCEEF;
+    --bg: #14152C;
+    --card: #1a1b36;
+    --border: #2e3060;
+    --purple: #5B4BFF;
+    --purple-dark: #4a3ce0;
+    --text: #f0f0ff;
+    --text2: #c5c7e8;
+    --muted: #9a9cbe;
+    --green: #4caf7d;
+    --on-accent: #0a0f1e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.45;
+  }
+  body {
+    padding: 16px 20px;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+  .shell {
+    width: 100%;
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .privacy {
+    background: rgba(91, 75, 255, 0.12);
+    border: 1px solid rgba(91, 75, 255, 0.35);
+    color: var(--text2);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: 12px;
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  header { display: flex; align-items: center; gap: 12px; }
+  .mark {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: var(--lc-primary);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .title { font-size: 24px; font-weight: 800; color: var(--text); letter-spacing: -0.02em; }
+  .sub { font-size: 14px; color: var(--text2); margin-top: 2px; }
+  .pill {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(91,75,255,0.22);
+    color: var(--lc-light);
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .workspace {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  @media (min-width: 900px) {
+    .workspace { grid-template-columns: 1fr 1fr; align-items: stretch; }
+  }
+  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+  }
+  .card.grow { flex: 1; display: flex; flex-direction: column; gap: 12px; min-height: 280px; }
+  label.field { display: block; font-size: 13px; font-weight: 700; color: var(--text2); margin-bottom: 6px; }
+  select, textarea {
+    width: 100%;
+    background: #12132a;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    font: inherit;
+    padding: 12px 14px;
+  }
+  textarea { min-height: 160px; resize: vertical; }
+  select { min-height: 48px; }
+  .row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .file-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: none;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary { background: var(--purple); color: #fff; width: 100%; }
+  .btn-primary:hover:not(:disabled) { background: var(--purple-dark); color: #fff; }
+  /* Copy uses magenta fill + dark ink for contrast */
+  .btn-accent { background: #f0a3d8; color: var(--on-accent); }
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--purple); color: var(--lc-light); }
+
+  .hint { font-size: 13px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .thumb {
+    width: 64px; height: 64px; object-fit: cover;
+    border-radius: 10px; border: 1px solid var(--border);
+  }
+  .status {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text2);
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+  }
+  .status.busy { color: var(--lc-light); border-color: rgba(91,75,255,0.45); }
+  .status.ok { color: var(--green); border-color: rgba(76,175,125,0.45); }
+  .status.err { color: #ff8a80; border-color: rgba(255,82,82,0.4); }
+  .result {
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 15px;
+    color: var(--text);
+    background: #12132a;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    overflow: auto;
+    max-height: 50vh;
+    min-height: 160px;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .actions .btn { flex: 1; min-width: 120px; }
+  footer {
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+    padding: 8px 0 4px;
+  }
+  code { font-size: 12px; color: var(--lc-light); }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <div class="privacy">
+      Privacy: we process your upload only for this job. Downloads auto-expire — we don’t keep your docs.
+    </div>
+    <div class="topbar">
+      <header>
+        <div class="mark" aria-hidden="true">Ld</div>
+        <div>
+          <div class="title">Lightdocs <span class="pill">v1</span></div>
+          <div class="sub">Notes → Word · Lightchain AIVM · KeikoDev</div>
+        </div>
+      </header>
+    </div>
+
+    <div class="workspace">
+      <div class="col">
+        <div class="card">
+          <div class="row-2">
+            <div>
+              <label class="field" for="style">Style / voice</label>
+              <select id="style">
+                <option value="plain" selected>Plain English</option>
+                <option value="formal">Formal / professional</option>
+                <option value="simple">Simple / ELI5</option>
+                <option value="nerd">Nerd / detailed</option>
+                <option value="tech">Tech expert</option>
+                <option value="friendly">Friendly / casual</option>
+              </select>
+            </div>
+            <div>
+              <label class="field" for="outfmt">Output</label>
+              <select id="outfmt" disabled>
+                <option value="docx" selected>Word (.docx)</option>
+              </select>
+            </div>
+          </div>
+          <p class="hint">v1 hero loop: Notes → Word only. Other modes come later.</p>
+        </div>
+
+        <div class="card grow">
+          <label class="field" for="input">Paste or type notes</label>
+          <textarea id="input" placeholder="Paste messy notes, bullets, or a rough paragraph…&#10;&#10;Or take a photo of handwritten / printed notes below."></textarea>
+          <div class="file-row">
+            <label class="btn btn-ghost">
+              Take photo / gallery
+              <input type="file" id="images" accept="image/*" capture="environment" multiple hidden>
+            </label>
+          </div>
+          <div class="thumbs" id="thumbs"></div>
+          <p class="hint">Phone tip: after Generate, you can switch apps — we’ll keep the job id and finish the download when you return.</p>
+        </div>
+
+        <button class="btn btn-primary" id="generate" type="button">Generate Word doc</button>
+      </div>
+
+      <div class="col">
+        <div class="card grow">
+          <div class="status" id="status">Ready — paste notes or add a photo, then Generate.</div>
+          <div class="result" id="result" aria-live="polite">Result text shows here for Copy. Download delivers a real .docx.</div>
+          <div class="actions">
+            <button class="btn btn-accent" id="copyBtn" type="button" disabled>Copy</button>
+            <button class="btn btn-ghost" id="downloadBtn" type="button" disabled>Download .docx</button>
+          </div>
+          <p class="hint" id="jobHint"></p>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      Lightdocs · KeikoDev · Powered by Lightchain AIVM ·
+      <span id="apiHint">API: set <code>window.LIGHTDOCS_API</code> or same-origin</span>
+    </footer>
+  </div>
+
+<script>
+(function () {
+  // Production: set before load, e.g. window.LIGHTDOCS_API = 'https://your-railway.app'
+  const API = (window.LIGHTDOCS_API || localStorage.getItem("lightdocs_api") || "").replace(/\/$/, "");
+  const JOB_KEY = "lightdocs_v1_job";
+
+  const styleEl = document.getElementById("style");
+  const input = document.getElementById("input");
+  const images = document.getElementById("images");
+  const thumbs = document.getElementById("thumbs");
+  const generate = document.getElementById("generate");
+  const status = document.getElementById("status");
+  const result = document.getElementById("result");
+  const copyBtn = document.getElementById("copyBtn");
+  const downloadBtn = document.getElementById("downloadBtn");
+  const jobHint = document.getElementById("jobHint");
+  const apiHint = document.getElementById("apiHint");
+
+  if (API) apiHint.innerHTML = "API: <code>" + API.replace(/^https?:\/\//, "") + "</code>";
+
+  let lastText = "";
+  let lastDownloadUrl = "";
+  let pollTimer = null;
+  let imageFiles = [];
+
+  function setBusy(on) {
+    generate.disabled = on;
+    copyBtn.disabled = on || !lastText;
+    downloadBtn.disabled = on || !lastDownloadUrl;
+  }
+
+  function setStatus(kind, msg) {
+    status.className = "status" + (kind ? " " + kind : "");
+    status.textContent = msg;
+  }
+
+  images.addEventListener("change", () => {
+    imageFiles = Array.from(images.files || []);
+    thumbs.innerHTML = "";
+    imageFiles.forEach((f) => {
+      if (!f.type.startsWith("image/")) return;
+      const url = URL.createObjectURL(f);
+      const img = document.createElement("img");
+      img.className = "thumb";
+      img.src = url;
+      img.alt = f.name || "note photo";
+      thumbs.appendChild(img);
+    });
+  });
+
+  async function pollJob(jobId) {
+    const r = await fetch(API + "/api/jobs/" + encodeURIComponent(jobId));
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "Job poll failed");
+    return data;
+  }
+
+  function clearPoll() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function applyDone(data) {
+    lastText = data.text || "";
+    result.textContent = lastText || "(empty)";
+    lastDownloadUrl = data.download_url
+      ? (data.download_url.startsWith("http") ? data.download_url : API + data.download_url)
+      : "";
+    setStatus("ok", data.step || "Done — download ready.");
+    jobHint.textContent = data.job_id
+      ? "Job " + data.job_id.slice(0, 8) + "… · " + (data.privacy || "We don’t keep your docs long.")
+      : "";
+    localStorage.removeItem(JOB_KEY);
+    setBusy(false);
+  }
+
+  function startPolling(jobId) {
+    localStorage.setItem(JOB_KEY, jobId);
+    jobHint.textContent = "Job " + jobId.slice(0, 8) + "… — safe to background this tab.";
+    clearPoll();
+    pollTimer = setInterval(async () => {
+      try {
+        const data = await pollJob(jobId);
+        setStatus("busy", data.step || data.status);
+        if (data.status === "done") {
+          clearPoll();
+          applyDone(data);
+        } else if (data.status === "error") {
+          clearPoll();
+          localStorage.removeItem(JOB_KEY);
+          setStatus("err", data.error || "Generation failed");
+          setBusy(false);
+        }
+      } catch (e) {
+        clearPoll();
+        localStorage.removeItem(JOB_KEY);
+        setStatus("err", e.message || String(e));
+        setBusy(false);
+      }
+    }, 3000);
+  }
+
+  // Resume in-flight job after backgrounding
+  (async function resume() {
+    const jobId = localStorage.getItem(JOB_KEY);
+    if (!jobId || !API) return;
+    setBusy(true);
+    setStatus("busy", "Resuming job…");
+    try {
+      const data = await pollJob(jobId);
+      if (data.status === "done") applyDone(data);
+      else if (data.status === "error") {
+        localStorage.removeItem(JOB_KEY);
+        setStatus("err", data.error || "Previous job failed");
+        setBusy(false);
+      } else {
+        setStatus("busy", data.step || "Still working…");
+        startPolling(jobId);
+      }
+    } catch (_) {
+      localStorage.removeItem(JOB_KEY);
+      setBusy(false);
+      setStatus("", "Ready — paste notes or add a photo, then Generate.");
+    }
+  })();
+
+  generate.addEventListener("click", async () => {
+    if (!API) {
+      setStatus("err", "Set window.LIGHTDOCS_API to your Railway URL first.");
+      return;
+    }
+    const text = (input.value || "").trim();
+    if (!text && imageFiles.length === 0) {
+      setStatus("err", "Paste notes or add at least one photo.");
+      return;
+    }
+    lastText = "";
+    lastDownloadUrl = "";
+    result.textContent = "";
+    setBusy(true);
+    setStatus("busy", "Starting job…");
+    try {
+      const fd = new FormData();
+      fd.append("mode", "notes-word");
+      fd.append("style", styleEl.value);
+      fd.append("text", text);
+      imageFiles.slice(0, 5).forEach((f) => fd.append("images", f, f.name || "note.jpg"));
+
+      const r = await fetch(API + "/api/jobs", { method: "POST", body: fd });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "Could not start job");
+      setStatus("busy", "Job started — AIVM may take 1–2 minutes…");
+      startPolling(data.job_id);
+    } catch (e) {
+      setStatus("err", e.message || String(e));
+      setBusy(false);
+    }
+  });
+
+  copyBtn.addEventListener("click", async () => {
+    if (!lastText) return;
+    try {
+      await navigator.clipboard.writeText(lastText);
+      setStatus("ok", "Copied to clipboard.");
+    } catch {
+      setStatus("", "Copy failed — select the text manually.");
+    }
+  });
+
+  downloadBtn.addEventListener("click", () => {
+    if (!lastDownloadUrl) return;
+    const a = document.createElement("a");
+    a.href = lastDownloadUrl;
+    a.download = "lightdocs-notes.docx";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setStatus("ok", "Download started — open the .docx on your phone.");
+  });
+})();
+</script>
+</body>
+</html>

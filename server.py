@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 
 VALID_MODES = frozenset(
     {
@@ -452,19 +452,29 @@ MODE_TASKS: dict[str, str] = {
         "Do not invent damage that is not in INPUT."
     ),
     "dao": (
-        "Draft a Lightchain LCAI DUNA governor proposal from rough notes. Match real "
-        "Lightchain proposal structure EXACTLY with these sections in order:\n"
-        "1) Title — [Verb] [Subject], plain and specific (no hype)\n"
-        "2) Summary — 1–2 sentences of what is authorized, including headline numbers\n"
-        "3) Key terms — bullets for amounts, rates, counterparties, duration\n"
-        "4) Why it matters / rationale — short paragraph\n"
-        "5) Scope & limitations — what this does NOT authorize\n"
-        "6) What this means / effect if passed — bullets\n"
-        "7) Governance / execution footer — voting-window note + placeholders for "
-        "on-chain record and dao.lightchain.ai link\n"
-        "House style: sober, transparent, DUNA framing (LCAI DUNA; Administrator "
-        "Quantum Counsel LLC when relevant). NEVER invent tx hashes, proposal IDs, "
-        "treasury balances, or vote results — use [TO FILL]."
+        "Draft a Lightchain LCAI DUNA governance proposal from rough notes, to be decided by a DAO "
+        "governance vote. The LCAI DUNA is a Wyoming Decentralized Unincorporated Nonprofit "
+        "Association; authority rests with governance / the community via a DAO vote. There is NO "
+        "'governor' role — NEVER write 'DUNA governor' or say a governor authorizes anything. "
+        "Match the real Lightchain proposal structure and sober legal tone, sections in order:\n"
+        "Title — [Verb] [Subject], plain and specific, no hype.\n"
+        "Summary — 1-2 short paragraphs stating exactly what is adopted/authorized.\n"
+        "Motivation — why this is needed (short paragraphs).\n"
+        "Proposal — an 'Authorize the following:' list of the specific, concrete authorizations.\n"
+        "Scope and limitations — what this proposal does NOT authorize.\n"
+        "Execution — plain prose on what happens upon passage; say 'No on-chain treasury action is "
+        "required' when true.\n"
+        "Voting options — exactly three, each a full sentence: For (adoption), Against (rejection), "
+        "Abstain (counts toward quorum; no vote for or against).\n"
+        "Include these OPTIONAL sections ONLY if the INPUT supports them: Legal Basis (prior proposal "
+        "numbers/Articles only if given), Official copy (File / URL / SHA-256 only if provided), "
+        "Rationale, Constraints.\n"
+        "House style: sober, transparent, precise governance/legal register; refer to 'the Association' "
+        "or 'the LCAI DUNA'; Wyoming governing-law framing where relevant. NEVER invent proposal IDs, "
+        "tx hashes, SHA-256 values, treasury balances, vote counts, dates, wallet addresses, or names "
+        "— use [TO FILL] only where a genuinely required specific is missing. Do NOT append a "
+        "'Governance / execution footer' or any voting-window / on-chain-record / dao.lightchain.ai "
+        "placeholder block; that format is wrong."
     ),
     "litepaper": (
         "Write a Lightchain-oriented litepaper / one-pager from INPUT: Title, Hook, "

@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.7.3"
+VERSION = "0.7.4"
 
 VALID_MODES = frozenset(
     {
@@ -43,6 +43,7 @@ VALID_MODES = frozenset(
         "dao",
         "litepaper",
         "announce",
+        "followup",
     }
 )
 
@@ -296,6 +297,9 @@ _LEAK_LINE_RES = [
         r"^what can you do with this information\??\s*$",
         r"^as a developer, you can\b",
         r"^today,? we'?re going to\b",
+        r"^here is the (formatted|plain|final)",
+        r"^here'?s the (formatted|plain|final)",
+        r"^here is your (document|answer|explanation|markdown)",
     )
 ]
 
@@ -596,6 +600,19 @@ def build_prompt(
     if mode == "notes-to-word":
         mode = "notes-word"
     voice = STYLE_PROMPTS.get(style, STYLE_PROMPTS["plain"])
+    if mode == "followup":
+        return f"""{voice}
+You are answering a reader's follow-up about a document they just had explained. The material below
+contains a DOCUMENT (background context) and a USER INSTRUCTION / QUESTION. Answer the question or
+apply the instruction directly and concisely in plain English (light Markdown is fine). Use the
+DOCUMENT as background, but you MAY use general knowledge to define terms or answer things the
+DOCUMENT does not cover. Never fabricate specific facts, numbers, names, or addresses about the
+DOCUMENT itself. Do not restate the whole document unless asked. Use exact names verbatim — never
+rename or invent a name (for example, never 'OrcaApp'). Do NOT greet, introduce yourself, name
+yourself, or add preamble such as 'Here is the output'. Answer directly.
+
+{raw[:12000]}
+"""
     lightchain_ok = mode in ("dao", "litepaper", "announce")
     ground = (
         "CRITICAL: Use ONLY the INPUT below. Do not invent facts. "

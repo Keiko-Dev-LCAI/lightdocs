@@ -2140,7 +2140,7 @@
     setStatus("busy", "Working on your follow-up…");
     try {
       const fd = new FormData();
-      fd.append("mode", "explain");
+      fd.append("mode", "followup");
       fd.append("style", styleEl.value);
       fd.append("output", "md");
       fd.append("text", ask);

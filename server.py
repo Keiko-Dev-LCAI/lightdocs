@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 VALID_MODES = frozenset(
     {
@@ -996,6 +996,154 @@ def download_job(job_id: str):
         as_attachment=True,
         download_name=job.get("download_name") or "lightdocs-out.bin",
         mimetype=job.get("mime") or "application/octet-stream",
+    )
+
+
+def _decode_image_src(src: str) -> Optional[bytes]:
+    if not src or not isinstance(src, str):
+        return None
+    try:
+        if src.startswith("data:"):
+            import base64
+
+            raw = src.split(",", 1)[-1]
+            return base64.b64decode(raw)
+        if src.startswith("http://") or src.startswith("https://"):
+            r = requests.get(src, timeout=30)
+            if r.ok:
+                return r.content
+        # relative API path
+        if src.startswith("/"):
+            # not fetchable from here without host — skip
+            return None
+    except Exception as e:
+        print(f"[export] image decode failed: {e}")
+    return None
+
+
+def _add_picture_wrapped(doc: Document, img_bytes: bytes, width_in: float, wrap: str) -> None:
+    """Embed PNG/JPEG with approximate wrap: full/inline block, left/right via 2-col table."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches as DocInches
+
+    width_in = max(0.8, min(float(width_in or 4.5), 6.5))
+    wrap = (wrap or "full").lower()
+    bio = io.BytesIO(img_bytes)
+    if wrap in ("left", "right"):
+        table = doc.add_table(rows=1, cols=2)
+        table.autofit = True
+        cell_img = table.rows[0].cells[0 if wrap == "left" else 1]
+        cell_txt = table.rows[0].cells[1 if wrap == "left" else 0]
+        p = cell_img.paragraphs[0]
+        run = p.add_run()
+        bio.seek(0)
+        run.add_picture(bio, width=DocInches(width_in))
+        cell_txt.paragraphs[0].add_run("")  # placeholder for surrounding text flow
+        return
+    p = doc.add_paragraph()
+    if wrap == "full":
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run()
+    bio.seek(0)
+    run.add_picture(bio, width=DocInches(width_in))
+
+
+def build_docx_from_blocks(blocks: list[Any], path: Path) -> None:
+    """Build a .docx from the editor document model (text + positioned images)."""
+    doc = Document()
+    for block in blocks[:400]:
+        if not isinstance(block, dict):
+            continue
+        btype = (block.get("type") or "paragraph").lower()
+        if btype == "heading":
+            level = int(block.get("level") or 1)
+            level = 1 if level < 1 else 3 if level > 3 else level
+            doc.add_heading(str(block.get("text") or "").strip() or " ", level=level)
+        elif btype in ("bullet", "list_item", "list"):
+            doc.add_paragraph(str(block.get("text") or "").strip(), style="List Bullet")
+        elif btype in ("number", "ordered"):
+            doc.add_paragraph(str(block.get("text") or "").strip(), style="List Number")
+        elif btype in ("image", "chart"):
+            src = block.get("src") or block.get("dataUrl") or ""
+            blob = _decode_image_src(str(src))
+            if not blob:
+                continue
+            width_in = float(block.get("width_in") or block.get("widthIn") or 4.5)
+            wrap = str(block.get("wrap") or "full")
+            try:
+                _add_picture_wrapped(doc, blob, width_in, wrap)
+            except Exception as e:
+                print(f"[export] picture skip: {e}")
+                cap = doc.add_paragraph(str(block.get("alt") or "[image]"))
+                if cap.runs:
+                    cap.runs[0].font.size = Pt(10)
+        else:
+            text = str(block.get("text") or "")
+            if text.strip():
+                doc.add_paragraph(text)
+            elif btype == "paragraph":
+                doc.add_paragraph("")
+    doc.save(str(path))
+
+
+@app.post("/api/render-chart")
+def render_chart_api():
+    """Render a chart spec to PNG (matplotlib). Editor positions it; does not draw charts."""
+    body = request.get_json(silent=True) or {}
+    spec = body.get("chart") if isinstance(body.get("chart"), dict) else body
+    if not isinstance(spec, dict):
+        return jsonify({"error": "Provide a chart spec object"}), 400
+    job_id = uuid.uuid4().hex[:12]
+    out = DATA_DIR / f"chart-render-{job_id}.png"
+    if not render_chart_png(spec, out):
+        return jsonify({"error": "Could not render chart — check labels/values"}), 400
+    return send_file(
+        out,
+        mimetype="image/png",
+        as_attachment=False,
+        download_name=f"chart-{job_id}.png",
+    )
+
+
+@app.post("/api/export/docx")
+def export_docx():
+    """Rebuild a .docx from the edited document model (client-side editor source of truth)."""
+    body = request.get_json(silent=True) or {}
+    blocks = body.get("blocks")
+    if not isinstance(blocks, list) or not blocks:
+        return jsonify({"error": "Provide blocks[] document model"}), 400
+    fname = f"lightdocs-edit-{uuid.uuid4().hex[:8]}.docx"
+    path = DATA_DIR / fname
+    try:
+        build_docx_from_blocks(blocks, path)
+    except Exception as e:
+        print(f"[export] failed: {e}")
+        return jsonify({"error": f"Export failed: {e}"}), 500
+    # short-lived: register a mini job meta so cleanup can find it
+    job_id = uuid.uuid4().hex
+    job = {
+        "id": job_id,
+        "status": "done",
+        "step": "Edited export ready",
+        "created": time.time(),
+        "file_path": str(path),
+        "docx_path": str(path),
+        "download_name": fname,
+        "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "output": "docx",
+        "text_out": None,
+        "error": None,
+    }
+    with _jobs_lock:
+        _jobs[job_id] = job
+        _save_job(job_id, job)
+    return jsonify(
+        {
+            "job_id": job_id,
+            "download_url": f"/api/jobs/{job_id}/download",
+            "download_name": fname,
+            "output": "docx",
+        }
     )
 
 

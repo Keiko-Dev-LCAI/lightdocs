@@ -173,7 +173,75 @@
     border-radius: 12px; padding: 16px 18px; overflow: auto; max-height: min(58vh, 640px); min-height: 180px;
     font-size: 15px; line-height: 1.55;
   }
-  .preview-pane.hidden, .result.hidden { display: none; }
+  .preview-pane.hidden, .result.hidden, .editor-shell.hidden { display: none; }
+  .preview-wrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .preview-expand-btn {
+    position: absolute; top: 8px; right: 8px; z-index: 2;
+    min-height: 40px; min-width: 40px; padding: 8px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: rgba(20,21,44,0.88); color: #fff;
+    font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  .preview-expand-btn:hover { border-color: var(--purple); }
+  .fs-overlay {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(10, 12, 28, 0.92); padding: 12px;
+    flex-direction: column; gap: 10px;
+  }
+  .fs-overlay.open { display: flex; }
+  .fs-toolbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-shrink: 0;
+  }
+  .fs-toolbar strong { color: #fff; font-size: 15px; }
+  .fs-body {
+    flex: 1; min-height: 0; overflow: auto; background: #f4f4f8; color: #14152C;
+    border-radius: 12px; padding: 16px 18px; border: 1px solid var(--border);
+  }
+  .editor-shell {
+    flex: 1; display: flex; flex-direction: column; gap: 10px; min-height: 180px;
+  }
+  .editor-toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  .editor-toolbar .btn-sm { min-height: 40px; }
+  .editor-canvas {
+    flex: 1; min-height: 180px; max-height: min(58vh, 640px); overflow: auto;
+    background: #f7f7fb; color: #14152C; border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .ld-editor-prose { outline: none; min-height: 140px; line-height: 1.55; font-size: 15px; }
+  .ld-editor-prose h1, .ld-editor-prose h2, .ld-editor-prose h3 { margin: 0.6em 0 0.35em; color: #14152C; }
+  .ld-editor-prose p, .ld-editor-prose li { margin: 0.35em 0; }
+  .doc-image-node {
+    position: relative; margin: 12px 0; max-width: 100%;
+    border: 2px solid transparent; border-radius: 8px; padding: 4px;
+  }
+  .doc-image-node.is-selected { border-color: #5B4BFF; }
+  .doc-image-node.wrap-left { float: left; margin: 4px 14px 8px 0; }
+  .doc-image-node.wrap-right { float: right; margin: 4px 0 8px 14px; }
+  .doc-image-node.wrap-full { clear: both; display: block; margin: 12px auto; }
+  .doc-image-node.wrap-inline { display: inline-block; vertical-align: middle; margin: 0 6px; }
+  .doc-image-handles { display: none; }
+  .doc-image-node.is-selected .doc-image-handles { display: block; }
+  .doc-image-handle {
+    position: absolute; width: 12px; height: 12px; background: #5B4BFF; border: 2px solid #fff;
+    border-radius: 2px; z-index: 3;
+  }
+  .doc-image-handle.nw { top: 0; left: 0; cursor: nwse-resize; }
+  .doc-image-handle.ne { top: 0; right: 0; cursor: nesw-resize; }
+  .doc-image-handle.sw { bottom: 0; left: 0; cursor: nesw-resize; }
+  .doc-image-handle.se { bottom: 0; right: 0; cursor: nwse-resize; }
+  .phone-img-controls {
+    display: none; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 8px; background: #12132a; border: 1px solid var(--border); border-radius: 10px;
+  }
+  .phone-img-controls.show { display: flex; }
+  .phone-img-controls label { font-size: 12px; color: var(--text2); font-weight: 700; }
+  .phone-img-controls select, .phone-img-controls input[type="range"] {
+    min-height: 40px; width: auto; flex: 1; min-width: 100px;
+  }
+  @media (max-width: 719px) {
+    .doc-image-handles { display: none !important; }
+  }
   .preview-pane h1, .preview-pane h2, .preview-pane h3 { color: #14152C; margin: 0.6em 0 0.35em; }
   .preview-pane p, .preview-pane li { margin: 0.35em 0; }
   .preview-pane a { color: #5B4BFF; }
@@ -364,13 +432,39 @@
           <div class="status" id="status">Ready — paste notes or add a photo, then Generate.</div>
           <div class="result-toolbar">
             <label class="field" style="margin:0">Result</label>
-            <div class="toggle-group" role="group" aria-label="Preview or raw text">
+            <div class="toggle-group" role="group" aria-label="Preview, edit, or raw text">
               <button type="button" id="viewPreviewBtn" class="active">Preview</button>
+              <button type="button" id="viewEditBtn">Edit</button>
               <button type="button" id="viewRawBtn">Raw text</button>
             </div>
           </div>
-          <div class="preview-pane" id="preview" aria-live="polite">
-            <p class="preview-fallback">Preview shows here after Generate. Raw text still powers Copy.</p>
+          <div class="preview-wrap" id="previewWrap">
+            <button type="button" class="preview-expand-btn" id="previewExpandBtn" title="Enlarge preview">Expand</button>
+            <div class="preview-pane" id="preview" aria-live="polite">
+              <p class="preview-fallback">Preview shows here after Generate. Raw text still powers Copy.</p>
+            </div>
+          </div>
+          <div class="editor-shell hidden" id="editorShell">
+            <div class="editor-toolbar">
+              <button type="button" class="btn btn-ghost btn-sm" id="insertImageBtn">Add image</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="insertChartBtn">Add chart PNG</button>
+              <input type="file" id="editorImageFile" accept="image/*" hidden>
+            </div>
+            <div class="phone-img-controls" id="phoneImgControls">
+              <label for="imgSizeRange">Size</label>
+              <input type="range" id="imgSizeRange" min="100" max="560" value="320">
+              <label for="imgWrapSelect">Wrap</label>
+              <select id="imgWrapSelect">
+                <option value="full">Full width</option>
+                <option value="left">Wrap left</option>
+                <option value="right">Wrap right</option>
+                <option value="inline">Inline</option>
+              </select>
+              <button type="button" class="btn btn-ghost btn-sm" id="imgMoveUpBtn">Move up</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="imgMoveDownBtn">Move down</button>
+            </div>
+            <div class="editor-canvas" id="editorCanvas"></div>
+            <p class="hint">Edit text and place charts/images. Download rebuilds a real Word file from this layout.</p>
           </div>
           <div class="result hidden" id="result" aria-live="polite">Result text shows here for Copy. Download delivers the real file.</div>
           <div class="actions">
@@ -386,6 +480,14 @@
       Lightdocs · KeikoDev · Lightchain AIVM · drafts stay on-device ·
       <span id="apiHint"></span>
     </footer>
+  </div>
+
+  <div class="fs-overlay" id="fsOverlay" role="dialog" aria-modal="true" aria-label="Full-screen preview">
+    <div class="fs-toolbar">
+      <strong>Document preview</strong>
+      <button type="button" class="btn btn-ghost btn-sm" id="fsCloseBtn">Close</button>
+    </div>
+    <div class="fs-body" id="fsBody"></div>
   </div>
 
 <script>
@@ -412,8 +514,24 @@
   const status = document.getElementById("status");
   const result = document.getElementById("result");
   const preview = document.getElementById("preview");
+  const previewWrap = document.getElementById("previewWrap");
+  const previewExpandBtn = document.getElementById("previewExpandBtn");
+  const fsOverlay = document.getElementById("fsOverlay");
+  const fsBody = document.getElementById("fsBody");
+  const fsCloseBtn = document.getElementById("fsCloseBtn");
   const viewPreviewBtn = document.getElementById("viewPreviewBtn");
+  const viewEditBtn = document.getElementById("viewEditBtn");
   const viewRawBtn = document.getElementById("viewRawBtn");
+  const editorShell = document.getElementById("editorShell");
+  const editorCanvas = document.getElementById("editorCanvas");
+  const insertImageBtn = document.getElementById("insertImageBtn");
+  const insertChartBtn = document.getElementById("insertChartBtn");
+  const editorImageFile = document.getElementById("editorImageFile");
+  const phoneImgControls = document.getElementById("phoneImgControls");
+  const imgSizeRange = document.getElementById("imgSizeRange");
+  const imgWrapSelect = document.getElementById("imgWrapSelect");
+  const imgMoveUpBtn = document.getElementById("imgMoveUpBtn");
+  const imgMoveDownBtn = document.getElementById("imgMoveDownBtn");
   const copyBtn = document.getElementById("copyBtn");
   const downloadBtn = document.getElementById("downloadBtn");
   const jobHint = document.getElementById("jobHint");
@@ -434,7 +552,10 @@
   let lastDownloadUrl = "";
   let lastDownloadName = "lightdocs-out.bin";
   let lastOutput = "docx";
-  let viewMode = "preview"; // preview | raw
+  let viewMode = "preview"; // preview | edit | raw
+  let docEditor = null;
+  let editorLoading = false;
+  let chartPngDataUrls = []; // extracted / rendered chart PNGs for insert
   let pollTimer = null;
   let imageFiles = [];
   let activeDraftId = null;
@@ -496,14 +617,160 @@
   window.LIGHTDOCS_PDF_PREVIEW = { ensure: ensurePdfJs, ready: false };
 
   function setViewMode(mode) {
-    viewMode = mode === "raw" ? "raw" : "preview";
+    if (mode === "raw") viewMode = "raw";
+    else if (mode === "edit") viewMode = "edit";
+    else viewMode = "preview";
     viewPreviewBtn.classList.toggle("active", viewMode === "preview");
+    viewEditBtn.classList.toggle("active", viewMode === "edit");
     viewRawBtn.classList.toggle("active", viewMode === "raw");
-    preview.classList.toggle("hidden", viewMode !== "preview");
+    previewWrap.classList.toggle("hidden", viewMode !== "preview");
+    editorShell.classList.toggle("hidden", viewMode !== "edit");
     result.classList.toggle("hidden", viewMode !== "raw");
+    if (viewMode === "edit") ensureEditor();
   }
   viewPreviewBtn.addEventListener("click", () => setViewMode("preview"));
+  viewEditBtn.addEventListener("click", () => setViewMode("edit"));
   viewRawBtn.addEventListener("click", () => setViewMode("raw"));
+
+  function openFullscreenPreview() {
+    fsBody.innerHTML = "";
+    // clone current preview contents
+    Array.from(preview.childNodes).forEach((n) => fsBody.appendChild(n.cloneNode(true)));
+    fsOverlay.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+  function closeFullscreenPreview() {
+    fsOverlay.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+  previewExpandBtn.addEventListener("click", openFullscreenPreview);
+  fsCloseBtn.addEventListener("click", closeFullscreenPreview);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && fsOverlay.classList.contains("open")) closeFullscreenPreview();
+  });
+
+  function syncPhoneImgControls(sel) {
+    const phone = window.matchMedia && window.matchMedia("(max-width: 719px)").matches;
+    if (!sel || !phone) {
+      phoneImgControls.classList.remove("show");
+      return;
+    }
+    phoneImgControls.classList.add("show");
+    imgSizeRange.value = String(sel.width || 320);
+    imgWrapSelect.value = sel.wrap || "full";
+  }
+
+  async function ensureMarkdownItLib() {
+    return ensureMarkdownIt();
+  }
+
+  async function ensureEditor() {
+    if (docEditor || editorLoading) return docEditor;
+    if (!lastText && chartPngDataUrls.length === 0) {
+      editorCanvas.innerHTML = '<p class="preview-fallback">Generate a document first, then edit it here.</p>';
+      return null;
+    }
+    editorLoading = true;
+    editorCanvas.innerHTML = '<p class="preview-fallback">Loading editor…</p>';
+    try {
+      const mod = await import("./editor.js");
+      const md = await ensureMarkdownItLib();
+      editorCanvas.innerHTML = "";
+      if (docEditor) {
+        try { docEditor.destroy(); } catch (_) {}
+        docEditor = null;
+      }
+      docEditor = await mod.createLightdocsEditor({
+        element: editorCanvas,
+        markdown: lastText || "",
+        markdownIt: md,
+        onSelectImage: syncPhoneImgControls,
+      });
+      // If we already have chart PNGs and empty-ish doc, leave as-is; user can insert
+      setBusy(false);
+      copyBtn.disabled = !lastText && !(docEditor && docEditor.getText());
+      downloadBtn.disabled = false;
+    } catch (e) {
+      console.warn("[lightdocs editor]", e);
+      editorCanvas.innerHTML = '<p class="preview-fallback">Editor failed to load — use Preview / Raw. ' +
+        (e && e.message ? e.message : "") + "</p>";
+      docEditor = null;
+    } finally {
+      editorLoading = false;
+    }
+    return docEditor;
+  }
+
+  async function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  insertImageBtn.addEventListener("click", () => editorImageFile.click());
+  editorImageFile.addEventListener("change", async () => {
+    const f = (editorImageFile.files || [])[0];
+    editorImageFile.value = "";
+    if (!f) return;
+    await ensureEditor();
+    if (!docEditor) return;
+    const src = await fileToDataUrl(f);
+    docEditor.insertImage({ src, alt: f.name || "image", width: 320, wrap: "full" });
+  });
+
+  insertChartBtn.addEventListener("click", async () => {
+    await ensureEditor();
+    if (!docEditor) return;
+    if (chartPngDataUrls.length) {
+      docEditor.insertImage({
+        src: chartPngDataUrls[0],
+        alt: "chart",
+        width: 420,
+        wrap: "full",
+      });
+      setStatus("ok", "Inserted chart image. Drag/resize on desktop, or use size/wrap on phone.");
+      return;
+    }
+    // Try render a simple chart from lastText numbers via API if want_chart style data present
+    if (!API) {
+      setStatus("err", "No chart image yet — Generate with “Add a chart” first, or Add image.");
+      return;
+    }
+    setStatus("busy", "No chart on hand — Generate with Add a chart, or add an image.");
+  });
+
+  imgSizeRange.addEventListener("input", () => {
+    if (!docEditor) return;
+    docEditor.setImageAttrs({ width: parseInt(imgSizeRange.value, 10) || 320 });
+  });
+  imgWrapSelect.addEventListener("change", () => {
+    if (!docEditor) return;
+    docEditor.setImageAttrs({ wrap: imgWrapSelect.value });
+  });
+  imgMoveUpBtn.addEventListener("click", () => docEditor && docEditor.moveImage(-1));
+  imgMoveDownBtn.addEventListener("click", () => docEditor && docEditor.moveImage(1));
+
+  async function extractChartPngsFromDocx(url) {
+    chartPngDataUrls = [];
+    if (!url) return;
+    try {
+      await ensureDocxPreview(); // loads JSZip
+      const resp = await fetch(url);
+      if (!resp.ok) return;
+      const buf = await resp.arrayBuffer();
+      const zip = await window.JSZip.loadAsync(buf);
+      const names = Object.keys(zip.files).filter((n) => /^word\/media\/.+\.png$/i.test(n));
+      for (const name of names.slice(0, 4)) {
+        const b64 = await zip.files[name].async("base64");
+        chartPngDataUrls.push("data:image/png;base64," + b64);
+      }
+    } catch (e) {
+      console.warn("[lightdocs] chart extract", e);
+    }
+  }
 
   function showRawFallback(msg) {
     result.textContent = lastText || "(empty)";
@@ -742,8 +1009,8 @@
 
   function setBusy(on) {
     generate.disabled = on;
-    copyBtn.disabled = on || !lastText;
-    downloadBtn.disabled = on || !lastDownloadUrl;
+    copyBtn.disabled = on || !(lastText || (docEditor && docEditor.getText()));
+    downloadBtn.disabled = on || !(lastDownloadUrl || docEditor);
   }
   function setStatus(kind, msg) {
     status.className = "status" + (kind ? " " + kind : "");
@@ -1091,6 +1358,10 @@
       : "";
     lastDownloadName = data.download_name || ("lightdocs." + (lastOutput || "bin"));
     result.textContent = lastText || "(empty)";
+    if (docEditor) {
+      try { docEditor.destroy(); } catch (_) {}
+      docEditor = null;
+    }
     setStatus("ok", data.step || "Done — download ready.");
     jobHint.textContent = data.job_id
       ? ("Job " + data.job_id.slice(0, 8) + "… · drafts stay on this device only")
@@ -1099,6 +1370,11 @@
     setBusy(false);
     setViewMode("preview");
     renderPreview();
+    if (lastOutput === "docx" && lastDownloadUrl) {
+      extractChartPngsFromDocx(lastDownloadUrl);
+    } else {
+      chartPngDataUrls = [];
+    }
     queueAutosave();
   }
   function startPolling(jobId) {
@@ -1198,17 +1474,76 @@
   });
 
   copyBtn.addEventListener("click", async () => {
-    if (!lastText) return;
+    const text = (docEditor && viewMode === "edit")
+      ? docEditor.getText()
+      : lastText;
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(lastText);
+      await navigator.clipboard.writeText(text);
       setStatus("ok", "Copied to clipboard.");
     } catch {
       setStatus("", "Copy failed — select the text manually.");
     }
   });
 
-  downloadBtn.addEventListener("click", () => {
-    if (!lastDownloadUrl) return;
+  function triggerBlobDownload(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name || "lightdocs-out.bin";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  downloadBtn.addEventListener("click", async () => {
+    const structured = lastOutput === "xlsx" || lastOutput === "pptx";
+    // If the user opened the editor, export the edited model for Word/Markdown
+    if (docEditor && !structured) {
+      if (lastOutput === "md" && viewMode !== "edit") {
+        // prefer original md file unless they edited
+      }
+      if (API && (viewMode === "edit" || lastOutput === "docx")) {
+        try {
+          setStatus("busy", "Building edited Word file…");
+          const blocks = docEditor.getBlocks();
+          const r = await fetch(API + "/api/export/docx", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ blocks }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || "Export failed");
+          const dl = data.download_url.startsWith("http")
+            ? data.download_url
+            : API + data.download_url;
+          const fileResp = await fetch(dl);
+          if (!fileResp.ok) throw new Error("Download failed");
+          const blob = await fileResp.blob();
+          triggerBlobDownload(blob, data.download_name || "lightdocs-edit.docx");
+          lastText = docEditor.getText();
+          result.textContent = lastText;
+          setStatus("ok", "Edited document downloaded.");
+          return;
+        } catch (e) {
+          setStatus("err", e.message || String(e));
+          return;
+        }
+      }
+      if (lastOutput === "md" || !API) {
+        const text = docEditor.getText();
+        const blob = new Blob([text + "\n"], { type: "text/markdown;charset=utf-8" });
+        triggerBlobDownload(blob, "lightdocs-edit.md");
+        setStatus("ok", "Markdown downloaded.");
+        return;
+      }
+    }
+    if (!lastDownloadUrl) {
+      setStatus("err", "Nothing to download yet.");
+      return;
+    }
     const a = document.createElement("a");
     a.href = lastDownloadUrl;
     a.download = lastDownloadName;

@@ -95,6 +95,15 @@
     font-size: 13px; color: var(--text2); font-weight: 600; line-height: 1.45;
   }
   .check-row input { width: 18px; height: 18px; min-height: 0; margin-top: 2px; flex-shrink: 0; }
+  .chart-controls {
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+  }
+  .chart-controls .check-row {
+    margin-top: 0; min-height: 44px; align-items: center; cursor: pointer;
+  }
+  .chart-controls .check-row input { width: 20px; height: 20px; margin-top: 0; }
+  .chart-type-wrap { display: none; margin-top: 12px; }
+  .chart-type-wrap.show { display: block; }
   .file-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; align-items: center; }
   .mic-btn {
     min-width: 48px; gap: 8px;
@@ -308,8 +317,23 @@
               <span>Also wrap as Forum/Discord announcement (emoji sections). Default off.</span>
             </label>
           </div>
+          <div class="chart-controls" id="chartControls">
+            <label class="check-row" for="wantChart">
+              <input type="checkbox" id="wantChart">
+              <span>📊 Add a chart from my numbers</span>
+            </label>
+            <div class="chart-type-wrap" id="chartTypeWrap">
+              <label class="field" for="chartType">Chart type</label>
+              <select id="chartType">
+                <option value="auto" selected>Auto (best fit)</option>
+                <option value="bar">Bar</option>
+                <option value="line">Line</option>
+                <option value="pie">Pie</option>
+              </select>
+            </div>
+          </div>
           <p class="hint" id="modeHint">Phone photo or paste handwritten notes → clean Word-style notes.</p>
-          <p class="hint" id="outHint">Word embeds charts as images when your notes include clear numbers.</p>
+          <p class="hint" id="outHint">Turn on “Add a chart from my numbers” when your notes include figures you want charted.</p>
         </div>
 
         <div class="card grow">
@@ -400,6 +424,9 @@
   const refreshDraftsBtn = document.getElementById("refreshDraftsBtn");
   const propType = document.getElementById("propType");
   const forumWrap = document.getElementById("forumWrap");
+  const wantChart = document.getElementById("wantChart");
+  const chartType = document.getElementById("chartType");
+  const chartTypeWrap = document.getElementById("chartTypeWrap");
 
   apiHint.textContent = API ? ("API " + API.replace(/^https?:\/\//, "")) : "Set LIGHTDOCS_API";
 
@@ -667,11 +694,19 @@
     announce: "Paste news → Forum / Discord announcement with emoji sections."
   };
   const OUT_HINTS = {
-    docx: "Word embeds charts as images when your notes include clear numbers.",
-    md: "Markdown is best for Copy / Discord / forums.",
-    xlsx: "Excel expects numbers or a table — we’ll build real sheets.",
-    pptx: "PowerPoint turns notes into title + bullet slides."
+    docx: "Word embeds charts as images when you turn on “Add a chart from my numbers.”",
+    md: "Markdown is best for Copy / Discord / forums. Charts still need the toggle + numbers.",
+    xlsx: "Excel builds real sheets; turn on “Add a chart” for a native chart from your numbers.",
+    pptx: "PowerPoint builds slides; turn on “Add a chart” for a chart slide from your numbers."
   };
+
+  function syncChartTypeUI() {
+    chartTypeWrap.classList.toggle("show", !!wantChart.checked);
+  }
+  wantChart.addEventListener("change", () => { syncChartTypeUI(); queueAutosave(); });
+  chartType.addEventListener("change", () => queueAutosave());
+  syncChartTypeUI();
+
 
   function applyModeDefaults() {
     const m = modeEl.value;
@@ -783,6 +818,8 @@
       output: outfmt.value,
       propType: propType.value,
       forumWrap: !!forumWrap.checked,
+      wantChart: !!wantChart.checked,
+      chartType: chartType.value || "auto",
       resultText: lastText || "",
       updatedAt: Date.now(),
       images: images,
@@ -869,6 +906,9 @@
     if (d.output) outfmt.value = d.output;
     if (d.propType) propType.value = d.propType;
     forumWrap.checked = !!d.forumWrap;
+    wantChart.checked = !!d.wantChart;
+    if (d.chartType) chartType.value = d.chartType;
+    syncChartTypeUI();
     document.body.classList.toggle("mode-dao", modeEl.value === "dao");
     modeHint.textContent = MODE_HINTS[modeEl.value] || "";
     outHint.textContent = OUT_HINTS[outfmt.value] || "";
@@ -1094,6 +1134,9 @@
         if (auto.output) outfmt.value = auto.output;
         if (auto.propType) propType.value = auto.propType;
         forumWrap.checked = !!auto.forumWrap;
+        wantChart.checked = !!auto.wantChart;
+        if (auto.chartType) chartType.value = auto.chartType;
+        syncChartTypeUI();
         applyModeDefaults();
       }
     } catch (_) {}
@@ -1140,6 +1183,8 @@
       fd.append("text", text);
       fd.append("prop_type", propType.value);
       fd.append("forum_wrap", forumWrap.checked ? "1" : "0");
+      fd.append("want_chart", wantChart.checked ? "1" : "0");
+      fd.append("chart_type", chartType.value || "auto");
       imageFiles.slice(0, 5).forEach((f) => fd.append("images", f, f.name || "note.jpg"));
       const r = await fetch(API + "/api/jobs", { method: "POST", body: fd });
       const data = await r.json().catch(() => ({}));

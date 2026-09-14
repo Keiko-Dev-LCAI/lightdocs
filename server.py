@@ -347,14 +347,14 @@ MODE_TASKS: dict[str, str] = {
 }
 
 
-def _format_instructions(output: str, mode: str) -> str:
+def _format_instructions(output: str, mode: str, want_chart: bool = False) -> str:
     """How the model should shape the reply for the chosen download format."""
-    charts = (
-        "If INPUT has clear numeric series worth charting, you may include "
-        '```lightdocs\n{"charts":[{"type":"bar|line|pie","title":"...","labels":["A"],'
-        '"values":[1],"x_label":"","y_label":""}]}\n``` '
-        "(bar/line/pie only)."
-    )
+    chart_hint = ""
+    if want_chart:
+        chart_hint = (
+            " Include a sibling \"charts\" array when INPUT has real numeric series "
+            "(never invent numbers)."
+        )
     if output == "xlsx":
         return (
             "Return ONLY a fenced block (nothing else):\n"
@@ -362,8 +362,14 @@ def _format_instructions(output: str, mode: str) -> str:
             '{ "sheets": [ { "name": "Sheet1", "columns": ["A","B"], '
             '"rows": [["x",1],["y",2]] } ] }\n'
             "```\n"
-            "Optional: add a sibling \"charts\" array in the same JSON for native Excel charts.\n"
-            "If INPUT is not tabular, one Notes column listing the points."
+            + (
+                "Also include a \"charts\" array in the same JSON for a native Excel chart "
+                "when INPUT has real numbers — never invent values.\n"
+                if want_chart
+                else "Do not add a charts array unless the user data clearly needs one.\n"
+            )
+            + "If INPUT is not tabular, one Notes column listing the points."
+            + chart_hint
         )
     if output == "pptx":
         return (
@@ -372,19 +378,23 @@ def _format_instructions(output: str, mode: str) -> str:
             '{ "slides": [ { "title": "Overview", "bullets": ["Point A","Point B"], '
             '"notes": "" } ] }\n'
             "```\n"
-            "Optional: include a \"charts\" array in the same JSON for a chart slide."
+            + (
+                "Also include a \"charts\" array in the same JSON when INPUT has real "
+                "numbers for a chart slide — never invent values."
+                if want_chart
+                else "Do not add a charts array unless clearly needed."
+            )
         )
+    base = "Output clean Markdown only (no preamble). "
     if mode == "sheet":
-        return (
-            "Output clean Markdown with a readable table of the data (no preamble). "
-            + charts
+        base = "Output clean Markdown with a readable table of the data (no preamble). "
+    elif mode == "deck":
+        base = "Output clean Markdown: each slide as ## Title plus bullets (no preamble). "
+    if want_chart:
+        return base + (
+            "The user requested a chart — see the chart instruction below."
         )
-    if mode == "deck":
-        return (
-            "Output clean Markdown: each slide as ## Title plus bullets (no preamble). "
-            + charts
-        )
-    return "Output clean Markdown only (no preamble). " + charts
+    return base + "Do not emit a charts block unless the input is clearly numeric series data."
 
 
 
@@ -429,7 +439,30 @@ def build_prompt(
                 "Do NOT wrap as a forum announcement; emit the proposal body only."
             )
 
-    fmt = _format_instructions(output, mode)
+    want_chart = bool(extras.get("want_chart"))
+    chart_type = str(extras.get("chart_type") or "auto").lower()
+    if chart_type not in ("auto", "bar", "line", "pie"):
+        chart_type = "auto"
+    if want_chart:
+        type_line = (
+            "Pick the best of bar, line, or pie for the data."
+            if chart_type == "auto"
+            else f'Use chart type "{chart_type}" only.'
+        )
+        extra_bits.append(
+            "CHART REQUESTED BY USER: Extract a numeric series from INPUT (labels + values) "
+            "and emit a ```lightdocs chart spec. "
+            + type_line
+            + " Example:\n"
+            "```lightdocs\n"
+            '{"charts":[{"type":"bar","title":"...","labels":["A","B"],"values":[1,2],'
+            '"x_label":"","y_label":""}]}\n'
+            "```\n"
+            "If INPUT has no clear chartable numbers, omit the charts array entirely — "
+            "NEVER invent numbers to satisfy this request. Still produce the normal document."
+        )
+
+    fmt = _format_instructions(output, mode, want_chart=want_chart)
     extra = ("\n".join(extra_bits) + "\n") if extra_bits else ""
 
     return f"""You are Lightdocs, a document formatter.
@@ -733,6 +766,16 @@ def process_job(
                 if render_chart_png(spec, png):
                     chart_pngs.append((str(spec.get("title") or f"Chart {i+1}"), png))
 
+        chart_note = ""
+        if extras.get("want_chart"):
+            has_chart = bool(chart_pngs) or bool(charts)
+            if not has_chart:
+                chart_note = "No clear numbers to chart — added the text only."
+                if md.strip():
+                    md = md.strip() + "\n\n_" + chart_note + "_\n"
+                else:
+                    md = "_" + chart_note + "_\n"
+
         if output == "md":
             fname = f"lightdocs-{job_id[:8]}.md"
             path = DATA_DIR / fname
@@ -749,6 +792,8 @@ def process_job(
                 if meta.get("sheets")
                 else md.strip()
             )
+            if chart_note:
+                text_out = (text_out + "\n\n" + chart_note).strip()
         elif output == "pptx":
             fname = f"lightdocs-{job_id[:8]}.pptx"
             path = DATA_DIR / fname
@@ -759,6 +804,8 @@ def process_job(
                 if meta.get("slides")
                 else md.strip()
             )
+            if chart_note:
+                text_out = (text_out + "\n\n" + chart_note).strip()
         else:
             output = "docx"
             fname = f"lightdocs-{job_id[:8]}.docx"
@@ -814,6 +861,8 @@ def create_job():
     mode = "notes-word"
     prop_type = "general"
     forum_wrap = False
+    want_chart = False
+    chart_type = "auto"
     images: list[bytes] = []
 
     if request.content_type and "multipart/form-data" in request.content_type:
@@ -823,6 +872,8 @@ def create_job():
         mode = (request.form.get("mode") or "notes-word").strip()
         prop_type = (request.form.get("prop_type") or request.form.get("propType") or "general").strip()
         forum_wrap = _truthy(request.form.get("forum_wrap") or request.form.get("forumWrap"))
+        want_chart = _truthy(request.form.get("want_chart") or request.form.get("wantChart"))
+        chart_type = (request.form.get("chart_type") or request.form.get("chartType") or "auto").strip()
         for key in ("images", "image", "files"):
             for f in request.files.getlist(key):
                 if f and f.filename:
@@ -837,6 +888,8 @@ def create_job():
         mode = (body.get("mode") or "notes-word").strip()
         prop_type = str(body.get("prop_type") or body.get("propType") or "general").strip()
         forum_wrap = _truthy(body.get("forum_wrap") or body.get("forumWrap"))
+        want_chart = _truthy(body.get("want_chart") or body.get("wantChart"))
+        chart_type = str(body.get("chart_type") or body.get("chartType") or "auto").strip()
         for b64 in body.get("images") or []:
             try:
                 import base64
@@ -854,11 +907,19 @@ def create_job():
         mode = "notes-word"
     if prop_type not in ("general", "treasury", "param", "signal", "grant"):
         prop_type = "general"
+    chart_type = chart_type.lower()
+    if chart_type not in ("auto", "bar", "line", "pie"):
+        chart_type = "auto"
 
     if not text and not images:
         return jsonify({"error": "Provide text and/or at least one image"}), 400
 
-    extras = {"prop_type": prop_type, "forum_wrap": forum_wrap}
+    extras = {
+        "prop_type": prop_type,
+        "forum_wrap": forum_wrap,
+        "want_chart": want_chart,
+        "chart_type": chart_type,
+    }
     job_id = uuid.uuid4().hex
     job = {
         "id": job_id,

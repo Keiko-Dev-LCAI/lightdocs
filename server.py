@@ -1,35 +1,39 @@
-"""Lightdocs v1 backend — Notes → Word hero loop.
+"""Lightdocs backend — Notes → docs with optional charts + multi-format output.
 
-Accepts text and/or images, OCR → AIVM (server-side) → real .docx → short-lived download.
-No secrets in responses. Env: AIVM_RELAY, JOB_TTL_SECONDS, CORS_ORIGINS, PORT.
+Flow: accept job → OCR → AIVM → parse optional ```lightdocs JSON → build
+docx/md/xlsx/pptx → short-lived download. No secrets in responses.
+Env: AIVM_RELAY, JOB_TTL_SECONDS, CORS_ORIGINS, LIGHTDOCS_DATA, PORT.
 """
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 import requests
 from docx import Document
+from docx.shared import Inches, Pt, RGBColor
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 AIVM_RELAY = os.environ.get(
     "AIVM_RELAY", "https://web-production-aaaba.up.railway.app"
 ).rstrip("/")
-JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "3600"))  # 1h default
+JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "3600"))
 DATA_DIR = Path(os.environ.get("LIGHTDOCS_DATA", "/tmp/lightdocs-jobs"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+_META_DIR = DATA_DIR / "meta"
+_META_DIR.mkdir(parents=True, exist_ok=True)
 
 CORS_ORIGINS = [
     o.strip()
@@ -40,13 +44,15 @@ CORS_ORIGINS = [
     if o.strip()
 ]
 
+BRAND_PURPLE = "#5B4BFF"
+BRAND_MAGENTA = "#DD00AC"
+BRAND_COLORS = [BRAND_PURPLE, BRAND_MAGENTA, "#7B6CFF", "#EE11FB", "#4A3CE0", "#CCCEEF"]
+
 app = Flask(__name__)
 CORS(app, origins=CORS_ORIGINS, supports_credentials=False)
 
 _jobs_lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
-_META_DIR = DATA_DIR / "meta"
-_META_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _job_meta_path(job_id: str) -> Path:
@@ -54,18 +60,13 @@ def _job_meta_path(job_id: str) -> Path:
 
 
 def _save_job(job_id: str, job: dict[str, Any]) -> None:
-    """Persist job meta to disk so Railway restarts don't lose in-flight/done jobs."""
     try:
-        import json
-
         _job_meta_path(job_id).write_text(json.dumps(job), encoding="utf-8")
     except Exception as e:
         print(f"[job] meta save failed: {e}")
 
 
 def _load_job(job_id: str) -> Optional[dict[str, Any]]:
-    import json
-
     with _jobs_lock:
         if job_id in _jobs:
             return _jobs[job_id]
@@ -81,19 +82,26 @@ def _load_job(job_id: str) -> Optional[dict[str, Any]]:
         return None
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _cleanup_expired() -> None:
     now = time.time()
     with _jobs_lock:
-        dead = [jid for jid, j in _jobs.items() if now - j.get("created", now) > JOB_TTL_SECONDS]
+        dead = [
+            jid
+            for jid, j in _jobs.items()
+            if now - float(j.get("created", now)) > JOB_TTL_SECONDS
+        ]
         for jid in dead:
-            path = _jobs[jid].get("docx_path")
-            if path and Path(path).is_file():
+            for key in ("docx_path", "file_path"):
+                path = _jobs[jid].get(key)
+                if path and Path(path).is_file():
+                    try:
+                        Path(path).unlink()
+                    except OSError:
+                        pass
+            # chart pngs
+            for png in DATA_DIR.glob(f"{jid}-chart-*.png"):
                 try:
-                    Path(path).unlink()
+                    png.unlink()
                 except OSError:
                     pass
             try:
@@ -101,23 +109,23 @@ def _cleanup_expired() -> None:
             except OSError:
                 pass
             _jobs.pop(jid, None)
-    # also sweep meta dir
     for p in _META_DIR.glob("*.json"):
         try:
-            import json
-
             job = json.loads(p.read_text(encoding="utf-8"))
             if now - float(job.get("created", 0)) > JOB_TTL_SECONDS:
-                doc = job.get("docx_path")
-                if doc and Path(doc).is_file():
-                    Path(doc).unlink(missing_ok=True)
+                for key in ("docx_path", "file_path"):
+                    doc = job.get(key)
+                    if doc and Path(doc).is_file():
+                        Path(doc).unlink(missing_ok=True)
+                jid = job.get("id") or p.stem
+                for png in DATA_DIR.glob(f"{jid}-chart-*.png"):
+                    png.unlink(missing_ok=True)
                 p.unlink(missing_ok=True)
         except Exception:
             pass
 
 
 def ocr_image_bytes(data: bytes) -> str:
-    """OCR image bytes → text. RapidOCR if available."""
     try:
         from rapidocr_onnxruntime import RapidOCR
         from PIL import Image
@@ -129,15 +137,13 @@ def ocr_image_bytes(data: bytes) -> str:
         result, _ = ocr(buf.getvalue())
         if not result:
             return ""
-        lines = [line[1] for line in result if line and len(line) > 1]
-        return "\n".join(lines).strip()
+        return "\n".join(line[1] for line in result if line and len(line) > 1).strip()
     except Exception as e:
         print(f"[ocr] failed: {e}")
         return ""
 
 
 def aivm_infer(prompt: str, timeout: int = 240) -> str:
-    """Server-side AIVM via fleet relay (same pattern as Binai)."""
     start = requests.post(
         f"{AIVM_RELAY}/api/chat",
         json={"message": prompt, "mode": "chat"},
@@ -177,26 +183,132 @@ STYLE_PROMPTS = {
 }
 
 
-def build_notes_prompt(raw: str, style: str) -> str:
+def parse_lightdocs_payload(raw: str) -> tuple[str, dict[str, Any]]:
+    """Split AIVM output into markdown + optional ```lightdocs JSON block."""
+    meta: dict[str, Any] = {}
+    md = raw
+    m = re.search(r"```lightdocs\s*([\s\S]*?)```", raw, re.I)
+    if m:
+        md = (raw[: m.start()] + raw[m.end() :]).strip()
+        try:
+            meta = json.loads(m.group(1).strip())
+            if not isinstance(meta, dict):
+                meta = {}
+        except Exception:
+            meta = {}
+    # also accept bare trailing JSON object with charts/sheets/slides
+    if not meta:
+        m2 = re.search(r"(\{\s*\"(?:charts|sheets|slides)\"[\s\S]*\})\s*$", raw)
+        if m2:
+            try:
+                meta = json.loads(m2.group(1))
+                md = raw[: m2.start()].strip()
+            except Exception:
+                pass
+    return md, meta
+
+
+def build_prompt(raw: str, style: str, output: str) -> str:
     voice = STYLE_PROMPTS.get(style, STYLE_PROMPTS["plain"])
-    return f"""You are Lightdocs on Lightchain. Turn messy notes into clean meeting-style notes.
+    if output == "xlsx":
+        return f"""You are Lightdocs. Turn the input into spreadsheet data.
+
+{voice}
+
+Return ONLY a fenced block:
+```lightdocs
+{{ "sheets": [ {{ "name": "Sheet1", "columns": ["A","B"], "rows": [["x",1],["y",2]] }} ] }}
+```
+Use real numbers/labels from the input. If input is not tabular, make one sheet with a single Notes column listing the points.
+Do not invent data.
+
+INPUT:
+{raw[:12000]}
+"""
+    if output == "pptx":
+        return f"""You are Lightdocs. Turn the input into a short slide deck outline.
+
+{voice}
+
+Return ONLY a fenced block:
+```lightdocs
+{{ "slides": [ {{ "title": "Overview", "bullets": ["Point A","Point B"], "notes": "" }} ] }}
+```
+5–10 slides max. Preserve facts; do not invent.
+
+INPUT:
+{raw[:12000]}
+"""
+    # docx / md — prose + optional charts
+    return f"""You are Lightdocs on Lightchain. Turn messy notes into clean document Markdown.
 
 {voice}
 
 Rules:
-- Output clean Markdown only (no preamble about being an AI).
-- Use headings, bullets, and short paragraphs.
-- Preserve facts from the input; do not invent names, dates, or numbers.
-- If input is sparse, organize what exists and note gaps briefly.
-- Title the doc with a short H1.
+- Output clean Markdown (headings, bullets, short paragraphs). No AI preamble.
+- Preserve facts; do not invent names, dates, or numbers.
+- Title with a short H1.
+- If the notes contain clear numeric data worth charting, ALSO append a fenced block:
+```lightdocs
+{{ "charts": [ {{ "type": "bar|line|pie", "title": "...", "labels": ["A","B"], "values": [1,2], "x_label": "", "y_label": "" }} ] }}
+```
+Supported chart types only: bar, line, pie. If no chartable data, omit the block.
 
 INPUT NOTES:
 {raw[:12000]}
 """
 
 
-def markdown_to_docx(md: str, path: Path) -> None:
-    """Minimal Markdown → docx (headings, bullets, paragraphs)."""
+def render_chart_png(spec: dict[str, Any], out_path: Path) -> bool:
+    """Render one chart spec with matplotlib (Agg). Return True on success."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        ctype = (spec.get("type") or "bar").lower()
+        labels = list(spec.get("labels") or [])
+        values = [float(v) for v in (spec.get("values") or [])]
+        if not labels or not values or len(labels) != len(values):
+            return False
+        title = str(spec.get("title") or "Chart")
+        fig, ax = plt.subplots(figsize=(7.2, 4.2), dpi=140)
+        fig.patch.set_facecolor("#ffffff")
+        ax.set_facecolor("#f7f7fb")
+        colors = (BRAND_COLORS * ((len(values) // len(BRAND_COLORS)) + 1))[: len(values)]
+        xs = list(range(len(labels)))
+        if ctype == "line":
+            ax.plot(xs, values, color=BRAND_PURPLE, marker="o", linewidth=2.2)
+            ax.fill_between(xs, values, alpha=0.12, color=BRAND_PURPLE)
+            ax.set_xticks(xs)
+            ax.set_xticklabels(labels, rotation=20, ha="right")
+        elif ctype == "pie":
+            ax.pie(values, labels=labels, colors=colors, autopct="%1.0f%%", startangle=90)
+            ax.axis("equal")
+        else:
+            ax.bar(xs, values, color=colors, edgecolor="white", linewidth=0.6)
+            ax.set_xticks(xs)
+            ax.set_xticklabels(labels, rotation=20, ha="right")
+        if ctype != "pie":
+            if spec.get("x_label"):
+                ax.set_xlabel(str(spec["x_label"]))
+            if spec.get("y_label"):
+                ax.set_ylabel(str(spec["y_label"]))
+            ax.grid(axis="y", linestyle="--", alpha=0.35)
+            for spine in ("top", "right"):
+                ax.spines[spine].set_visible(False)
+        ax.set_title(title, fontsize=13, fontweight="bold", color="#14152C", pad=12)
+        fig.tight_layout()
+        fig.savefig(str(out_path), bbox_inches="tight")
+        plt.close(fig)
+        return out_path.is_file()
+    except Exception as e:
+        print(f"[chart] render failed: {e}")
+        return False
+
+
+def markdown_to_docx(md: str, path: Path, chart_pngs: list[tuple[str, Path]]) -> None:
     doc = Document()
     for raw_line in md.splitlines():
         line = raw_line.rstrip()
@@ -213,13 +325,167 @@ def markdown_to_docx(md: str, path: Path) -> None:
         elif re.match(r"^\d+\.\s+", line):
             doc.add_paragraph(re.sub(r"^\d+\.\s+", "", line), style="List Number")
         else:
-            # strip simple bold markers
             clean = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
             doc.add_paragraph(clean)
+    for title, png in chart_pngs:
+        if not png.is_file():
+            continue
+        doc.add_heading(title or "Chart", level=2)
+        doc.add_picture(str(png), width=Inches(5.8))
+        cap = doc.add_paragraph(title or "Chart")
+        if cap.runs:
+            cap.runs[0].font.size = Pt(10)
+            cap.runs[0].font.color.rgb = RGBColor(0x5B, 0x4B, 0xFF)
     doc.save(str(path))
 
 
-def process_job(job_id: str, text: str, images: list[bytes], style: str) -> None:
+def build_xlsx(meta: dict[str, Any], fallback_md: str, path: Path) -> None:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.chart import BarChart, LineChart, PieChart, Reference
+
+    wb = Workbook()
+    sheets = meta.get("sheets") if isinstance(meta.get("sheets"), list) else None
+    if not sheets:
+        ws = wb.active
+        ws.title = "Notes"
+        ws.append(["Notes"])
+        for line in fallback_md.splitlines():
+            if line.strip():
+                ws.append([line.strip()])
+        ws.column_dimensions["A"].width = 60
+    else:
+        first = True
+        for spec in sheets[:8]:
+            name = str(spec.get("name") or "Sheet")[:31] or "Sheet"
+            cols = list(spec.get("columns") or [])
+            rows = list(spec.get("rows") or [])
+            if first:
+                ws = wb.active
+                ws.title = name
+                first = False
+            else:
+                ws = wb.create_sheet(name)
+            if cols:
+                ws.append(cols)
+                for cell in ws[1]:
+                    cell.font = Font(bold=True, color="5B4BFF")
+            for row in rows:
+                if isinstance(row, (list, tuple)):
+                    ws.append(list(row))
+                else:
+                    ws.append([row])
+            for i, _ in enumerate(cols or [0], start=1):
+                ws.column_dimensions[chr(64 + min(i, 26))].width = 16
+        # optional native charts on first sheet if chart specs exist
+        charts = meta.get("charts") if isinstance(meta.get("charts"), list) else []
+        if charts and sheets:
+            ws = wb[wb.sheetnames[0]]
+            # simple bar from first chart if values align with rows
+            try:
+                c0 = charts[0]
+                labels = list(c0.get("labels") or [])
+                values = list(c0.get("values") or [])
+                if labels and values and len(labels) == len(values):
+                    tmp = wb.create_sheet("_chart_data")
+                    tmp.append(["Label", "Value"])
+                    for lab, val in zip(labels, values):
+                        tmp.append([lab, float(val)])
+                    ctype = (c0.get("type") or "bar").lower()
+                    chart = (
+                        PieChart()
+                        if ctype == "pie"
+                        else LineChart()
+                        if ctype == "line"
+                        else BarChart()
+                    )
+                    chart.title = str(c0.get("title") or "Chart")
+                    data = Reference(tmp, min_col=2, min_row=1, max_row=1 + len(values))
+                    cats = Reference(tmp, min_col=1, min_row=2, max_row=1 + len(values))
+                    chart.add_data(data, titles_from_data=True)
+                    chart.set_categories(cats)
+                    ws.add_chart(chart, "E2")
+            except Exception as e:
+                print(f"[xlsx chart] skip: {e}")
+    wb.save(str(path))
+
+
+def build_pptx(meta: dict[str, Any], fallback_md: str, path: Path) -> None:
+    from pptx import Presentation
+    from pptx.chart.data import CategoryChartData
+    from pptx.dml.color import RGBColor as PptRGB
+    from pptx.enum.chart import XL_CHART_TYPE
+    from pptx.util import Inches as PptInches, Pt as PptPt
+
+    prs = Presentation()
+    slides = meta.get("slides") if isinstance(meta.get("slides"), list) else None
+    if not slides:
+        # fallback: split markdown headings into slides
+        chunks = re.split(r"\n(?=# )", fallback_md.strip()) or [fallback_md]
+        slides = []
+        for ch in chunks[:12]:
+            lines = [ln.strip() for ln in ch.splitlines() if ln.strip()]
+            title = lines[0].lstrip("# ").strip() if lines else "Notes"
+            bullets = [re.sub(r"^[-*#\d.\s]+", "", ln) for ln in lines[1:8]]
+            slides.append({"title": title, "bullets": [b for b in bullets if b], "notes": ""})
+    for spec in slides[:16]:
+        layout = prs.slide_layouts[1]  # title + content
+        slide = prs.slides.add_slide(layout)
+        title = str(spec.get("title") or "Slide")
+        slide.shapes.title.text = title
+        body = slide.placeholders[1].text_frame
+        body.clear()
+        bullets = list(spec.get("bullets") or [])
+        if not bullets:
+            p = body.paragraphs[0]
+            p.text = ""
+        else:
+            for i, b in enumerate(bullets[:10]):
+                p = body.paragraphs[0] if i == 0 else body.add_paragraph()
+                p.text = str(b)
+                p.level = 0
+                p.font.size = PptPt(20)
+                p.font.color.rgb = PptRGB(0x14, 0x15, 0x2C)
+        notes = str(spec.get("notes") or "").strip()
+        if notes:
+            slide.notes_slide.notes_text_frame.text = notes
+
+    # optional native chart slide when AIVM returned a chart spec
+    charts = meta.get("charts") if isinstance(meta.get("charts"), list) else []
+    for c0 in charts[:2]:
+        if not isinstance(c0, dict):
+            continue
+        labels = list(c0.get("labels") or [])
+        values = list(c0.get("values") or [])
+        if not labels or not values or len(labels) != len(values):
+            continue
+        try:
+            nums = [float(v) for v in values]
+            ctype = (c0.get("type") or "bar").lower()
+            chart_data = CategoryChartData()
+            chart_data.categories = [str(x) for x in labels]
+            chart_data.add_series(str(c0.get("y_label") or "Value"), nums)
+            xl_type = (
+                XL_CHART_TYPE.PIE
+                if ctype == "pie"
+                else XL_CHART_TYPE.LINE_MARKERS
+                if ctype == "line"
+                else XL_CHART_TYPE.COLUMN_CLUSTERED
+            )
+            blank = prs.slide_layouts[5]  # title only
+            slide = prs.slides.add_slide(blank)
+            slide.shapes.title.text = str(c0.get("title") or "Chart")
+            slide.shapes.add_chart(
+                xl_type, PptInches(1.0), PptInches(1.6), PptInches(8.0), PptInches(4.8), chart_data
+            )
+        except Exception as e:
+            print(f"[pptx chart] skip: {e}")
+    prs.save(str(path))
+
+
+def process_job(
+    job_id: str, text: str, images: list[bytes], style: str, output: str
+) -> None:
     def set_step(status: str, step: str, **extra: Any) -> None:
         with _jobs_lock:
             job = _jobs.get(job_id) or {}
@@ -227,6 +493,7 @@ def process_job(job_id: str, text: str, images: list[bytes], style: str) -> None
             _jobs[job_id] = job
             _save_job(job_id, job)
 
+    chart_pngs: list[tuple[str, Path]] = []
     try:
         set_step("ocr", "Reading images (OCR)…")
         ocr_parts = []
@@ -242,23 +509,60 @@ def process_job(job_id: str, text: str, images: list[bytes], style: str) -> None
         if not combined:
             raise RuntimeError("No text found — paste notes or use a clearer photo.")
 
-        set_step("aivm", "AIVM drafting notes (may take 1–2 min)…")
-        prompt = build_notes_prompt(combined, style)
-        out = aivm_infer(prompt)
-        if not out or len(out) < 8:
+        set_step("aivm", "AIVM drafting (may take 1–2 min)…")
+        raw_out = aivm_infer(build_prompt(combined, style, output))
+        if not raw_out or len(raw_out) < 4:
             raise RuntimeError("AIVM returned empty output — try again.")
+        md, meta = parse_lightdocs_payload(raw_out)
+        if not md.strip() and output in ("docx", "md"):
+            md = raw_out
 
-        set_step("building", "Building Word file…")
-        fname = f"lightdocs-notes-{job_id[:8]}.docx"
-        path = DATA_DIR / fname
-        markdown_to_docx(out, path)
+        set_step("building", f"Building {output} file…")
+        # charts for docx
+        charts = meta.get("charts") if isinstance(meta.get("charts"), list) else []
+        if output == "docx" and charts:
+            for i, spec in enumerate(charts[:4]):
+                if not isinstance(spec, dict):
+                    continue
+                png = DATA_DIR / f"{job_id}-chart-{i}.png"
+                if render_chart_png(spec, png):
+                    chart_pngs.append((str(spec.get("title") or f"Chart {i+1}"), png))
+
+        if output == "md":
+            fname = f"lightdocs-{job_id[:8]}.md"
+            path = DATA_DIR / fname
+            path.write_text(md.strip() + "\n", encoding="utf-8")
+            mime = "text/markdown; charset=utf-8"
+            text_out = md.strip()
+        elif output == "xlsx":
+            fname = f"lightdocs-{job_id[:8]}.xlsx"
+            path = DATA_DIR / fname
+            build_xlsx(meta, md, path)
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            text_out = md.strip() or json.dumps(meta.get("sheets") or [], indent=2)
+        elif output == "pptx":
+            fname = f"lightdocs-{job_id[:8]}.pptx"
+            path = DATA_DIR / fname
+            build_pptx(meta, md, path)
+            mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            text_out = md.strip() or json.dumps(meta.get("slides") or [], indent=2)
+        else:
+            output = "docx"
+            fname = f"lightdocs-{job_id[:8]}.docx"
+            path = DATA_DIR / fname
+            markdown_to_docx(md, path, chart_pngs)
+            mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            text_out = md.strip()
 
         set_step(
             "done",
             "Done — download ready. We don’t keep your docs long.",
-            text_out=out,
+            text_out=text_out,
             download_name=fname,
-            docx_path=str(path),
+            file_path=str(path),
+            docx_path=str(path),  # backward compat
+            mime=mime,
+            output=output,
             error=None,
         )
     except Exception as e:
@@ -275,22 +579,24 @@ def health():
             "version": VERSION,
             "aivm_relay_configured": bool(AIVM_RELAY),
             "retention_seconds": JOB_TTL_SECONDS,
-            "privacy": "Uploads processed for the job only; files auto-expire. We don’t keep your docs.",
+            "formats": ["docx", "md", "xlsx", "pptx"],
+            "privacy": "Uploads processed for the job only; files auto-expire. We don’t keep your docs. Drafts stay on your device only.",
         }
     )
 
 
 @app.post("/api/jobs")
 def create_job():
-    """Create notes-to-word job. multipart: text, style, images[]; or JSON."""
     _cleanup_expired()
     style = "plain"
     text = ""
+    output = "docx"
     images: list[bytes] = []
 
     if request.content_type and "multipart/form-data" in request.content_type:
         text = (request.form.get("text") or "").strip()
         style = (request.form.get("style") or "plain").strip()
+        output = (request.form.get("output") or request.form.get("outfmt") or "docx").strip()
         mode = (request.form.get("mode") or "notes-word").strip()
         for key in ("images", "image", "files"):
             for f in request.files.getlist(key):
@@ -302,9 +608,9 @@ def create_job():
         body = request.get_json(silent=True) or {}
         text = (body.get("text") or "").strip()
         style = (body.get("style") or "plain").strip()
+        output = (body.get("output") or body.get("outfmt") or "docx").strip()
         mode = (body.get("mode") or "notes-word").strip()
         for b64 in body.get("images") or []:
-            # optional base64 data URLs
             try:
                 import base64
 
@@ -313,8 +619,9 @@ def create_job():
             except Exception:
                 pass
 
+    if output not in ("docx", "md", "xlsx", "pptx"):
+        output = "docx"
     if mode not in ("notes-word", "notes-to-word", "meeting"):
-        # v1 hero only — accept meeting as alias, ignore others
         mode = "notes-word"
 
     if not text and not images:
@@ -329,24 +636,27 @@ def create_job():
         "error": None,
         "text_out": None,
         "download_name": None,
+        "file_path": None,
         "docx_path": None,
+        "mime": None,
         "mode": mode,
         "style": style,
+        "output": output,
     }
     with _jobs_lock:
         _jobs[job_id] = job
         _save_job(job_id, job)
 
-    t = threading.Thread(
-        target=process_job, args=(job_id, text, images, style), daemon=True
-    )
-    t.start()
+    threading.Thread(
+        target=process_job, args=(job_id, text, images, style, output), daemon=True
+    ).start()
     return jsonify(
         {
             "job_id": job_id,
             "status": "queued",
             "poll_url": f"/api/jobs/{job_id}",
             "retention_seconds": JOB_TTL_SECONDS,
+            "output": output,
         }
     ), 202
 
@@ -357,19 +667,21 @@ def get_job(job_id: str):
     job = _load_job(job_id)
     if not job:
         return jsonify({"error": "Job not found or expired"}), 404
-    out = {
-        "job_id": job_id,
-        "status": job["status"],
-        "step": job["step"],
-        "error": job.get("error"),
-        "text": job.get("text_out") if job["status"] == "done" else None,
-        "download_url": (
-            f"/api/jobs/{job_id}/download" if job["status"] == "done" else None
-        ),
-        "download_name": job.get("download_name"),
-        "privacy": "We don’t keep your docs — downloads expire automatically.",
-    }
-    return jsonify(out)
+    return jsonify(
+        {
+            "job_id": job_id,
+            "status": job["status"],
+            "step": job["step"],
+            "error": job.get("error"),
+            "text": job.get("text_out") if job["status"] == "done" else None,
+            "download_url": (
+                f"/api/jobs/{job_id}/download" if job["status"] == "done" else None
+            ),
+            "download_name": job.get("download_name"),
+            "output": job.get("output"),
+            "privacy": "We don’t keep your docs — downloads expire automatically. Drafts stay on your device only.",
+        }
+    )
 
 
 @app.get("/api/jobs/<job_id>/download")
@@ -378,14 +690,14 @@ def download_job(job_id: str):
     job = _load_job(job_id)
     if not job or job["status"] != "done":
         return jsonify({"error": "Not ready or expired"}), 404
-    path = job.get("docx_path")
+    path = job.get("file_path") or job.get("docx_path")
     if not path or not Path(path).is_file():
         return jsonify({"error": "File gone — please generate again"}), 410
     return send_file(
         path,
         as_attachment=True,
-        download_name=job.get("download_name") or "lightdocs-notes.docx",
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        download_name=job.get("download_name") or "lightdocs-out.bin",
+        mimetype=job.get("mime") or "application/octet-stream",
     )
 
 

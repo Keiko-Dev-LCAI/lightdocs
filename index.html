@@ -4,14 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#5B4BFF">
-<title>Lightdocs — Notes → Word</title>
+<title>Lightdocs — Notes → Docs</title>
 <script>window.LIGHTDOCS_API = window.LIGHTDOCS_API || "https://lightdocs-production.up.railway.app";</script>
 <style>
   :root {
     --lc-primary: #5B4BFF;
     --lc-secondary: #DD00AC;
-    --lc-dark: #14152C;
-    --lc-light: #CCCEEF;
     --bg: #14152C;
     --card: #1a1b36;
     --border: #2e3060;
@@ -32,19 +30,9 @@
     font-size: 16px;
     line-height: 1.45;
   }
-  body {
-    padding: 16px 20px;
-    padding-bottom: max(20px, env(safe-area-inset-bottom));
-  }
-  .shell {
-    width: 100%;
-    max-width: 1100px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .privacy {
+  body { padding: 16px 20px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+  .shell { width: 100%; max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  .privacy, .draft-warn {
     background: rgba(91, 75, 255, 0.12);
     border: 1px solid rgba(91, 75, 255, 0.35);
     color: var(--text2);
@@ -53,158 +41,111 @@
     padding: 10px 14px;
     border-radius: 12px;
   }
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
+  .draft-warn { background: rgba(221, 0, 172, 0.1); border-color: rgba(221, 0, 172, 0.35); }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   header { display: flex; align-items: center; gap: 12px; }
   .mark {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
-    background: var(--lc-primary);
-    color: #fff;
-    display: grid;
-    place-items: center;
-    font-weight: 800;
-    font-size: 18px;
-    flex-shrink: 0;
+    width: 48px; height: 48px; border-radius: 12px; background: var(--lc-primary); color: #fff;
+    display: grid; place-items: center; font-weight: 800; font-size: 18px; flex-shrink: 0;
   }
-  .title { font-size: 24px; font-weight: 800; color: var(--text); letter-spacing: -0.02em; }
+  .title { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
   .sub { font-size: 14px; color: var(--text2); margin-top: 2px; }
   .pill {
-    display: inline-block;
-    font-size: 12px;
-    font-weight: 700;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: rgba(91,75,255,0.22);
-    color: var(--lc-light);
-    margin-left: 6px;
-    vertical-align: middle;
+    display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+    background: rgba(91,75,255,0.22); color: #CCCEEF; margin-left: 6px; vertical-align: middle;
   }
-  .workspace {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-  @media (min-width: 900px) {
-    .workspace { grid-template-columns: 1fr 1fr; align-items: stretch; }
+  .workspace { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  @media (min-width: 960px) {
+    .workspace { grid-template-columns: 280px 1fr 1fr; }
   }
   .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 16px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px;
   }
-  .card.grow { flex: 1; display: flex; flex-direction: column; gap: 12px; min-height: 280px; }
+  .card.grow { flex: 1; display: flex; flex-direction: column; gap: 12px; min-height: 260px; }
   label.field { display: block; font-size: 13px; font-weight: 700; color: var(--text2); margin-bottom: 6px; }
-  select, textarea {
-    width: 100%;
-    background: #12132a;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    color: var(--text);
-    font: inherit;
-    padding: 12px 14px;
+  select, textarea, input[type="text"] {
+    width: 100%; background: #12132a; border: 1px solid var(--border); border-radius: 12px;
+    color: var(--text); font: inherit; padding: 12px 14px; min-height: 48px;
   }
-  textarea { min-height: 160px; resize: vertical; }
-  select { min-height: 48px; }
-  .row-2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
+  textarea { min-height: 150px; resize: vertical; }
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .file-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 48px;
-    padding: 12px 16px;
-    border-radius: 12px;
-    border: none;
-    font: inherit;
-    font-weight: 700;
-    cursor: pointer;
-    text-decoration: none;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 48px; padding: 12px 16px; border-radius: 12px; border: none;
+    font: inherit; font-weight: 700; cursor: pointer; text-decoration: none;
   }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn-primary { background: var(--purple); color: #fff; width: 100%; }
-  .btn-primary:hover:not(:disabled) { background: var(--purple-dark); color: #fff; }
-  /* Copy uses magenta fill + dark ink for contrast */
+  .btn-primary:hover:not(:disabled) { background: var(--purple-dark); }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--purple); color: #CCCEEF; }
   .btn-accent { background: #f0a3d8; color: var(--on-accent); }
-  .btn-ghost {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text);
-  }
-  .btn-ghost:hover:not(:disabled) { border-color: var(--purple); color: var(--lc-light); }
-
+  .btn-sm { min-height: 40px; padding: 8px 12px; font-size: 13px; width: auto; }
   .hint { font-size: 13px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
   .thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  .thumb {
-    width: 64px; height: 64px; object-fit: cover;
-    border-radius: 10px; border: 1px solid var(--border);
-  }
+  .thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); }
   .status {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text2);
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid var(--border);
+    font-size: 14px; font-weight: 600; color: var(--text2); padding: 10px 12px; border-radius: 10px;
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
   }
-  .status.busy { color: var(--lc-light); border-color: rgba(91,75,255,0.45); }
+  .status.busy { color: #CCCEEF; border-color: rgba(91,75,255,0.45); }
   .status.ok { color: var(--green); border-color: rgba(76,175,125,0.45); }
   .status.err { color: #ff8a80; border-color: rgba(255,82,82,0.4); }
   .result {
-    flex: 1;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 15px;
-    color: var(--text);
-    background: #12132a;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px;
-    overflow: auto;
-    max-height: 50vh;
-    min-height: 160px;
+    flex: 1; white-space: pre-wrap; word-break: break-word; font-size: 15px; color: var(--text);
+    background: #12132a; border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+    overflow: auto; max-height: 50vh; min-height: 140px;
   }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .actions .btn { flex: 1; min-width: 120px; }
-  footer {
-    font-size: 12px;
-    color: var(--muted);
-    text-align: center;
-    padding: 8px 0 4px;
+  .draft-list { display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow: auto; }
+  .draft-item {
+    border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: #12132a;
   }
-  code { font-size: 12px; color: var(--lc-light); }
+  .draft-item strong { display: block; font-size: 14px; margin-bottom: 4px; }
+  .draft-meta { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .draft-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  footer { font-size: 12px; color: var(--muted); text-align: center; padding: 8px 0 4px; }
+  code { font-size: 12px; color: #CCCEEF; }
 </style>
 </head>
 <body>
   <div class="shell">
     <div class="privacy">
-      Privacy: we process your upload only for this job. Downloads auto-expire — we don’t keep your docs.
+      Privacy: we process uploads only for this job. Downloads auto-expire — we don’t keep your docs on the server.
     </div>
     <div class="topbar">
       <header>
         <div class="mark" aria-hidden="true">Ld</div>
         <div>
-          <div class="title">Lightdocs <span class="pill">v1</span></div>
-          <div class="sub">Notes → Word · Lightchain AIVM · KeikoDev</div>
+          <div class="title">Lightdocs <span class="pill">v1+</span></div>
+          <div class="sub">Notes → Word / Markdown / Excel / PowerPoint · charts when data fits · KeikoDev</div>
         </div>
       </header>
     </div>
 
     <div class="workspace">
+      <div class="col">
+        <div class="card grow">
+          <label class="field">My projects</label>
+          <div class="draft-warn">
+            <strong>Drafts are saved on this device only.</strong>
+            They stay in this browser on this phone/computer.
+            They will <strong>not</strong> appear on your other phone or PC, and they’re erased if you clear your browser data.
+            Download the finished document to keep it.
+          </div>
+          <input type="text" id="draftName" placeholder="Draft name (optional)" style="margin-top:10px">
+          <div class="file-row" style="margin-top:8px">
+            <button class="btn btn-ghost btn-sm" id="saveDraftBtn" type="button">Save draft</button>
+            <button class="btn btn-ghost btn-sm" id="refreshDraftsBtn" type="button">Refresh</button>
+          </div>
+          <div class="draft-list" id="draftList" style="margin-top:10px"></div>
+          <p class="hint">Auto-saves while you type (same device/browser only).</p>
+        </div>
+      </div>
+
       <div class="col">
         <div class="card">
           <div class="row-2">
@@ -221,17 +162,20 @@
             </div>
             <div>
               <label class="field" for="outfmt">Output</label>
-              <select id="outfmt" disabled>
+              <select id="outfmt">
                 <option value="docx" selected>Word (.docx)</option>
+                <option value="md">Markdown (.md)</option>
+                <option value="xlsx">Excel (.xlsx)</option>
+                <option value="pptx">PowerPoint (.pptx)</option>
               </select>
             </div>
           </div>
-          <p class="hint">v1 hero loop: Notes → Word only. Other modes come later.</p>
+          <p class="hint" id="outHint">Word embeds charts as images when your notes include clear numbers.</p>
         </div>
 
         <div class="card grow">
           <label class="field" for="input">Paste or type notes</label>
-          <textarea id="input" placeholder="Paste messy notes, bullets, or a rough paragraph…&#10;&#10;Or take a photo of handwritten / printed notes below."></textarea>
+          <textarea id="input" placeholder="Paste messy notes, bullets, or numbers for a chart…&#10;&#10;Or take a photo of handwritten / printed notes below."></textarea>
           <div class="file-row">
             <label class="btn btn-ghost">
               Take photo / gallery
@@ -239,19 +183,18 @@
             </label>
           </div>
           <div class="thumbs" id="thumbs"></div>
-          <p class="hint">Phone tip: after Generate, you can switch apps — we’ll keep the job id and finish the download when you return.</p>
+          <p class="hint">Safe to background the tab after Generate — we keep a job id until the download is ready.</p>
         </div>
-
-        <button class="btn btn-primary" id="generate" type="button">Generate Word doc</button>
+        <button class="btn btn-primary" id="generate" type="button">Generate</button>
       </div>
 
       <div class="col">
         <div class="card grow">
           <div class="status" id="status">Ready — paste notes or add a photo, then Generate.</div>
-          <div class="result" id="result" aria-live="polite">Result text shows here for Copy. Download delivers a real .docx.</div>
+          <div class="result" id="result" aria-live="polite">Result text shows here for Copy. Download delivers the real file.</div>
           <div class="actions">
             <button class="btn btn-accent" id="copyBtn" type="button" disabled>Copy</button>
-            <button class="btn btn-ghost" id="downloadBtn" type="button" disabled>Download .docx</button>
+            <button class="btn btn-ghost" id="downloadBtn" type="button" disabled>Download</button>
           </div>
           <p class="hint" id="jobHint"></p>
         </div>
@@ -259,18 +202,22 @@
     </div>
 
     <footer>
-      Lightdocs · KeikoDev · Powered by Lightchain AIVM ·
-      <span id="apiHint">API: set <code>window.LIGHTDOCS_API</code> or same-origin</span>
+      Lightdocs · KeikoDev · Lightchain AIVM · drafts stay on-device ·
+      <span id="apiHint"></span>
     </footer>
   </div>
 
 <script>
 (function () {
-  // Production: set before load, e.g. window.LIGHTDOCS_API = 'https://your-railway.app'
-  const API = (window.LIGHTDOCS_API || localStorage.getItem("lightdocs_api") || "").replace(/\/$/, "");
+  const API = (window.LIGHTDOCS_API || "").replace(/\/$/, "");
   const JOB_KEY = "lightdocs_v1_job";
+  const DRAFT_DB = "lightdocs_drafts_v1";
+  const DRAFT_STORE = "projects";
+  const AUTOSAVE_ID = "autosave";
 
   const styleEl = document.getElementById("style");
+  const outfmt = document.getElementById("outfmt");
+  const outHint = document.getElementById("outHint");
   const input = document.getElementById("input");
   const images = document.getElementById("images");
   const thumbs = document.getElementById("thumbs");
@@ -281,24 +228,220 @@
   const downloadBtn = document.getElementById("downloadBtn");
   const jobHint = document.getElementById("jobHint");
   const apiHint = document.getElementById("apiHint");
+  const draftName = document.getElementById("draftName");
+  const draftList = document.getElementById("draftList");
+  const saveDraftBtn = document.getElementById("saveDraftBtn");
+  const refreshDraftsBtn = document.getElementById("refreshDraftsBtn");
 
-  if (API) apiHint.innerHTML = "API: <code>" + API.replace(/^https?:\/\//, "") + "</code>";
+  apiHint.textContent = API ? ("API " + API.replace(/^https?:\/\//, "")) : "Set LIGHTDOCS_API";
 
   let lastText = "";
   let lastDownloadUrl = "";
+  let lastDownloadName = "lightdocs-out.bin";
   let pollTimer = null;
   let imageFiles = [];
+  let activeDraftId = null;
+  let autosaveTimer = null;
+
+  const OUT_HINTS = {
+    docx: "Word embeds charts as images when your notes include clear numbers.",
+    md: "Markdown is best for Copy / Discord / forums.",
+    xlsx: "Excel expects numbers or a table — we’ll build real sheets.",
+    pptx: "PowerPoint turns notes into title + bullet slides."
+  };
+  outfmt.addEventListener("change", () => {
+    outHint.textContent = OUT_HINTS[outfmt.value] || "";
+  });
 
   function setBusy(on) {
     generate.disabled = on;
     copyBtn.disabled = on || !lastText;
     downloadBtn.disabled = on || !lastDownloadUrl;
   }
-
   function setStatus(kind, msg) {
     status.className = "status" + (kind ? " " + kind : "");
     status.textContent = msg;
   }
+
+  // ── IndexedDB drafts ─────────────────────────────────────────────
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DRAFT_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(DRAFT_STORE)) {
+          db.createObjectStore(DRAFT_STORE, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbPut(rec) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(DRAFT_STORE, "readwrite");
+      tx.objectStore(DRAFT_STORE).put(rec);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function idbGetAll() {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(DRAFT_STORE, "readonly");
+      const req = tx.objectStore(DRAFT_STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbDelete(id) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(DRAFT_STORE, "readwrite");
+      tx.objectStore(DRAFT_STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function filesToStored(files) {
+    const out = [];
+    for (const f of (files || []).slice(0, 5)) {
+      try {
+        const buf = await f.arrayBuffer();
+        out.push({
+          name: f.name || "photo.jpg",
+          type: f.type || "image/jpeg",
+          data: buf
+        });
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  async function snapshotDraft(id, name) {
+    const images = await filesToStored(imageFiles);
+    return {
+      id: id || ("draft_" + Date.now().toString(36)),
+      name: (name || draftName.value || "Untitled draft").trim() || "Untitled draft",
+      text: input.value || "",
+      style: styleEl.value,
+      output: outfmt.value,
+      resultText: lastText || "",
+      updatedAt: Date.now(),
+      images: images,
+      imageNames: images.map((f) => f.name || "photo")
+    };
+  }
+
+  function restoreImages(stored) {
+    imageFiles = [];
+    thumbs.innerHTML = "";
+    (stored || []).forEach((item) => {
+      if (!item || !item.data) return;
+      const blob = new Blob([item.data], { type: item.type || "image/jpeg" });
+      const file = new File([blob], item.name || "photo.jpg", { type: item.type || "image/jpeg" });
+      imageFiles.push(file);
+      const url = URL.createObjectURL(blob);
+      const img = document.createElement("img");
+      img.className = "thumb";
+      img.src = url;
+      img.alt = item.name || "note photo";
+      thumbs.appendChild(img);
+    });
+  }
+
+  async function renderDrafts() {
+    const all = (await idbGetAll()).filter((d) => d.id !== AUTOSAVE_ID);
+    all.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    draftList.innerHTML = "";
+    if (!all.length) {
+      draftList.innerHTML = '<p class="hint">No saved projects yet on this device.</p>';
+      return;
+    }
+    all.forEach((d) => {
+      const el = document.createElement("div");
+      el.className = "draft-item";
+      const when = d.updatedAt ? new Date(d.updatedAt).toLocaleString() : "";
+      el.innerHTML =
+        "<strong></strong><div class=\"draft-meta\"></div><div class=\"draft-actions\"></div>";
+      el.querySelector("strong").textContent = d.name || "Untitled";
+      el.querySelector(".draft-meta").textContent =
+        when + " · " + (d.output || "docx") + (d.id === activeDraftId ? " · open" : "");
+      const actions = el.querySelector(".draft-actions");
+      const openBtn = document.createElement("button");
+      openBtn.className = "btn btn-ghost btn-sm";
+      openBtn.type = "button";
+      openBtn.textContent = "Open";
+      openBtn.onclick = () => openDraft(d);
+      const renBtn = document.createElement("button");
+      renBtn.className = "btn btn-ghost btn-sm";
+      renBtn.type = "button";
+      renBtn.textContent = "Rename";
+      renBtn.onclick = async () => {
+        const n = prompt("Rename draft", d.name || "");
+        if (!n) return;
+        d.name = n.trim() || d.name;
+        d.updatedAt = Date.now();
+        await idbPut(d);
+        renderDrafts();
+      };
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn btn-ghost btn-sm";
+      delBtn.type = "button";
+      delBtn.textContent = "Delete";
+      delBtn.onclick = async () => {
+        if (!confirm("Delete this draft from this device?")) return;
+        await idbDelete(d.id);
+        if (activeDraftId === d.id) activeDraftId = null;
+        renderDrafts();
+      };
+      actions.append(openBtn, renBtn, delBtn);
+      draftList.appendChild(el);
+    });
+  }
+
+  function openDraft(d) {
+    activeDraftId = d.id;
+    draftName.value = d.name || "";
+    input.value = d.text || "";
+    if (d.style) styleEl.value = d.style;
+    if (d.output) outfmt.value = d.output;
+    outHint.textContent = OUT_HINTS[outfmt.value] || "";
+    lastText = d.resultText || "";
+    result.textContent = lastText || "Result text shows here for Copy. Download delivers the real file.";
+    lastDownloadUrl = "";
+    restoreImages(d.images || []);
+    setBusy(false);
+    copyBtn.disabled = !lastText;
+    downloadBtn.disabled = true;
+    setStatus("ok", "Draft opened (this device only). Generate again for a fresh file.");
+    renderDrafts();
+  }
+
+  saveDraftBtn.addEventListener("click", async () => {
+    const rec = await snapshotDraft(activeDraftId);
+    activeDraftId = rec.id;
+    await idbPut(rec);
+    setStatus("ok", "Draft saved on this device only.");
+    renderDrafts();
+  });
+  refreshDraftsBtn.addEventListener("click", () => renderDrafts());
+
+  function queueAutosave() {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(async () => {
+      const rec = await snapshotDraft(AUTOSAVE_ID, "Autosave");
+      rec.id = AUTOSAVE_ID;
+      // autosave skips large image blobs to keep typing snappy
+      rec.images = [];
+      await idbPut(rec);
+    }, 800);
+  }
+  input.addEventListener("input", queueAutosave);
+  styleEl.addEventListener("change", queueAutosave);
+  outfmt.addEventListener("change", queueAutosave);
 
   images.addEventListener("change", () => {
     imageFiles = Array.from(images.files || []);
@@ -312,6 +455,7 @@
       img.alt = f.name || "note photo";
       thumbs.appendChild(img);
     });
+    queueAutosave();
   });
 
   async function pollJob(jobId) {
@@ -320,28 +464,24 @@
     if (!r.ok) throw new Error(data.error || "Job poll failed");
     return data;
   }
-
   function clearPoll() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
-
   function applyDone(data) {
     lastText = data.text || "";
     result.textContent = lastText || "(empty)";
     lastDownloadUrl = data.download_url
       ? (data.download_url.startsWith("http") ? data.download_url : API + data.download_url)
       : "";
+    lastDownloadName = data.download_name || ("lightdocs." + (data.output || "bin"));
     setStatus("ok", data.step || "Done — download ready.");
     jobHint.textContent = data.job_id
-      ? "Job " + data.job_id.slice(0, 8) + "… · " + (data.privacy || "We don’t keep your docs long.")
+      ? ("Job " + data.job_id.slice(0, 8) + "… · drafts stay on this device only")
       : "";
     localStorage.removeItem(JOB_KEY);
     setBusy(false);
+    queueAutosave();
   }
-
   function startPolling(jobId) {
     localStorage.setItem(JOB_KEY, jobId);
     jobHint.textContent = "Job " + jobId.slice(0, 8) + "… — safe to background this tab.";
@@ -350,26 +490,31 @@
       try {
         const data = await pollJob(jobId);
         setStatus("busy", data.step || data.status);
-        if (data.status === "done") {
-          clearPoll();
-          applyDone(data);
-        } else if (data.status === "error") {
-          clearPoll();
-          localStorage.removeItem(JOB_KEY);
-          setStatus("err", data.error || "Generation failed");
-          setBusy(false);
+        if (data.status === "done") { clearPoll(); applyDone(data); }
+        else if (data.status === "error") {
+          clearPoll(); localStorage.removeItem(JOB_KEY);
+          setStatus("err", data.error || "Generation failed"); setBusy(false);
         }
       } catch (e) {
-        clearPoll();
-        localStorage.removeItem(JOB_KEY);
-        setStatus("err", e.message || String(e));
-        setBusy(false);
+        clearPoll(); localStorage.removeItem(JOB_KEY);
+        setStatus("err", e.message || String(e)); setBusy(false);
       }
     }, 3000);
   }
 
-  // Resume in-flight job after backgrounding
-  (async function resume() {
+  (async function boot() {
+    await renderDrafts();
+    // restore autosave if empty
+    try {
+      const all = await idbGetAll();
+      const auto = all.find((d) => d.id === AUTOSAVE_ID);
+      if (auto && !(input.value || "").trim()) {
+        input.value = auto.text || "";
+        if (auto.style) styleEl.value = auto.style;
+        if (auto.output) outfmt.value = auto.output;
+      }
+    } catch (_) {}
+
     const jobId = localStorage.getItem(JOB_KEY);
     if (!jobId || !API) return;
     setBusy(true);
@@ -388,32 +533,26 @@
     } catch (_) {
       localStorage.removeItem(JOB_KEY);
       setBusy(false);
-      setStatus("", "Ready — paste notes or add a photo, then Generate.");
     }
   })();
 
   generate.addEventListener("click", async () => {
-    if (!API) {
-      setStatus("err", "Set window.LIGHTDOCS_API to your Railway URL first.");
-      return;
-    }
+    if (!API) { setStatus("err", "API URL missing."); return; }
     const text = (input.value || "").trim();
     if (!text && imageFiles.length === 0) {
       setStatus("err", "Paste notes or add at least one photo.");
       return;
     }
-    lastText = "";
-    lastDownloadUrl = "";
-    result.textContent = "";
+    lastText = ""; lastDownloadUrl = ""; result.textContent = "";
     setBusy(true);
     setStatus("busy", "Starting job…");
     try {
       const fd = new FormData();
       fd.append("mode", "notes-word");
       fd.append("style", styleEl.value);
+      fd.append("output", outfmt.value);
       fd.append("text", text);
       imageFiles.slice(0, 5).forEach((f) => fd.append("images", f, f.name || "note.jpg"));
-
       const r = await fetch(API + "/api/jobs", { method: "POST", body: fd });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || "Could not start job");
@@ -439,12 +578,12 @@
     if (!lastDownloadUrl) return;
     const a = document.createElement("a");
     a.href = lastDownloadUrl;
-    a.download = "lightdocs-notes.docx";
+    a.download = lastDownloadName;
     a.rel = "noopener";
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setStatus("ok", "Download started — open the .docx on your phone.");
+    setStatus("ok", "Download started.");
   });
 })();
 </script>

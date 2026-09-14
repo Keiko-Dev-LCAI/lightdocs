@@ -843,7 +843,6 @@
   const downloadBtn = document.getElementById("downloadBtn");
   const sendBtn = document.getElementById("sendBtn");
   const jobHint = document.getElementById("jobHint");
-  const apiHint = document.getElementById("apiHint");
   const draftName = document.getElementById("draftName");
   const draftList = document.getElementById("draftList");
   const saveDraftBtn = document.getElementById("saveDraftBtn");
@@ -853,8 +852,6 @@
   const wantChart = document.getElementById("wantChart");
   const chartType = document.getElementById("chartType");
   const chartTypeWrap = document.getElementById("chartTypeWrap");
-
-  apiHint.textContent = API ? ("API " + API.replace(/^https?:\/\//, "")) : "Set LIGHTDOCS_API";
 
   // Terms modal (OrcaFiles-style)
   const termsModal = document.getElementById("modal-terms");

@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 
 VALID_MODES = frozenset(
     {
@@ -487,6 +487,9 @@ MODE_TASKS: dict[str, str] = {
     "explain": (
         "Scan & explain: give a plain-language explanation of what the INPUT document "
         "or notes mean. Structure as Overview, Key points, What to do next. "
+        "Use bullet points for key points and takeaways — do NOT put them in one long "
+        "continuous numbered list. Reserve numbered lists for genuine step-by-step "
+        "sequences, and restart numbering at 1 in each section. "
         "If quoting, keep short and clearly marked. Do not invent content not in INPUT."
     ),
     "rewrite": (
@@ -588,6 +591,9 @@ def build_prompt(
     lightchain_ok = mode in ("dao", "litepaper", "announce")
     ground = (
         "CRITICAL: Use ONLY the INPUT below. Do not invent facts. "
+        "Use the EXACT names, product/project names, identifiers, and addresses that appear in "
+        "the INPUT, verbatim — never rename, abbreviate, translate, or invent a name for anything "
+        "(for example, never change 'OrcaVault' into 'OrcaApp'). "
         "No preamble, no apologies, no 'here is the output', no token stats. "
     )
     if lightchain_ok:

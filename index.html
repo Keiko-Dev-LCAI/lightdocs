@@ -609,16 +609,33 @@
               <button type="button" class="btn btn-ghost btn-sm" id="fmtUnderline" aria-label="Underline"><u>U</u></button>
               <select id="fmtSize" aria-label="Font size">
                 <option value="">Size</option>
-                <option value="12px">Small</option>
-                <option value="16px" selected>Normal</option>
-                <option value="20px">Large</option>
-                <option value="28px">Heading</option>
+                <option value="8pt">8</option>
+                <option value="9pt">9</option>
+                <option value="10pt">10</option>
+                <option value="11pt">11</option>
+                <option value="12pt" selected>12</option>
+                <option value="14pt">14</option>
+                <option value="16pt">16</option>
+                <option value="18pt">18</option>
+                <option value="20pt">20</option>
+                <option value="24pt">24</option>
+                <option value="28pt">28</option>
+                <option value="36pt">36</option>
+                <option value="48pt">48</option>
+                <option value="72pt">72</option>
               </select>
               <select id="fmtFont" aria-label="Font family">
-                <option value="Inter, sans-serif">Inter</option>
-                <option value="Georgia, serif">Georgia</option>
-                <option value="'Courier New', monospace">Courier</option>
-                <option value="system-ui, sans-serif">System</option>
+                <option value="Inter" selected>Inter</option>
+                <option value="Arial">Arial</option>
+                <option value="Helvetica">Helvetica</option>
+                <option value="Calibri">Calibri</option>
+                <option value="Cambria">Cambria</option>
+                <option value="Georgia">Georgia</option>
+                <option value="Garamond">Garamond</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Verdana">Verdana</option>
+                <option value="Trebuchet MS">Trebuchet MS</option>
+                <option value="Courier New">Courier New</option>
               </select>
               <input type="color" id="fmtColor" value="#14152C" aria-label="Font color" title="Font color">
               <button type="button" class="btn btn-ghost btn-sm" id="insertImageBtn">Add image</button>
@@ -1061,18 +1078,22 @@
   if (fmtBold) fmtBold.addEventListener("click", () => withEditor((ed) => ed.chain().toggleBold().run()));
   if (fmtItalic) fmtItalic.addEventListener("click", () => withEditor((ed) => ed.chain().toggleItalic().run()));
   if (fmtUnderline) fmtUnderline.addEventListener("click", () => withEditor((ed) => ed.chain().toggleUnderline().run()));
-  if (fmtSize) fmtSize.addEventListener("change", () => {
-    withEditor((ed) => {
-      if (fmtSize.value) ed.chain().setFontSize(fmtSize.value).run();
-      else ed.chain().unsetFontSize().run();
-    });
-  });
-  if (fmtFont) fmtFont.addEventListener("change", () => {
-    withEditor((ed) => ed.chain().setFontFamily(fmtFont.value).run());
-  });
-  if (fmtColor) fmtColor.addEventListener("input", () => {
-    withEditor((ed) => ed.chain().setColor(fmtColor.value).run());
-  });
+  if (fmtSize) fmtSize.addEventListener("change", () => withEditor((ed) => {
+    const c = ed.chain();
+    if (ed.editor.state.selection.empty) c.selectAll();
+    if (fmtSize.value) c.setFontSize(fmtSize.value).run();
+    else c.unsetFontSize().run();
+  }));
+  if (fmtFont) fmtFont.addEventListener("change", () => withEditor((ed) => {
+    const c = ed.chain();
+    if (ed.editor.state.selection.empty) c.selectAll();
+    c.setFontFamily(fmtFont.value).run();
+  }));
+  if (fmtColor) fmtColor.addEventListener("input", () => withEditor((ed) => {
+    const c = ed.chain();
+    if (ed.editor.state.selection.empty) c.selectAll();
+    c.setColor(fmtColor.value).run();
+  }));
 
   if (editorExpandBtn) {
     editorExpandBtn.addEventListener("click", async () => {

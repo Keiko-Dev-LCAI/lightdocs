@@ -665,7 +665,7 @@
           <div class="actions">
             <button class="btn btn-accent" id="copyBtn" type="button" disabled>Copy</button>
             <button class="btn btn-ghost" id="downloadBtn" type="button" disabled>Download</button>
-            <button class="btn btn-ghost" id="sendBtn" type="button" disabled title="Share or send via OrcaMail — file stays on your device">Send</button>
+            <button class="btn btn-ghost" id="sendBtn" type="button" disabled title="Send / share — file stays on your device">Send</button>
           </div>
           <p class="hint" id="jobHint"></p>
         </div>
@@ -742,6 +742,26 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-primary" id="termsCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-share" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <h3 id="shareTitle">Send / Share</h3>
+        <button type="button" class="modal-close" id="shareCloseX" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body" style="gap:8px;">
+        <p style="font-size:12px;color:#8a8cb0;margin:0 0 6px;">
+          Pick where to send it. Your file is saved to this device first, then the app opens so you can attach it. Nothing is uploaded to LightDocs.
+        </p>
+        <button type="button" class="btn btn-ghost" data-share="email">✉️ Email</button>
+        <button type="button" class="btn btn-ghost" data-share="text">💬 Text message</button>
+        <button type="button" class="btn btn-ghost" data-share="wechat">🟢 WeChat</button>
+        <button type="button" class="btn btn-ghost" data-share="orcamail">🐳 OrcaMail</button>
+        <button type="button" class="btn btn-ghost" data-share="copy">📋 Copy text</button>
+        <button type="button" class="btn btn-accent" data-share="download">⬇️ Just save the file</button>
       </div>
     </div>
   </div>
@@ -971,7 +991,15 @@
   previewExpandBtn.addEventListener("click", openFullscreenPreview);
   fsCloseBtn.addEventListener("click", closeFullscreenPreview);
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && fsOverlay.classList.contains("open")) closeFullscreenPreview();
+    if (e.key !== "Escape") return;
+    const sm = document.getElementById("modal-share");
+    if (sm && sm.classList.contains("open")) {
+      sm.classList.remove("open");
+      document.body.style.overflow = "";
+      sendBtn?.focus();
+      return;
+    }
+    if (fsOverlay.classList.contains("open")) closeFullscreenPreview();
   });
 
   function syncPhoneImgControls(sel) {
@@ -2110,6 +2138,26 @@
     }
   });
 
+  let pendingShare = null;
+  const shareModal = document.getElementById("modal-share");
+  const shareCloseX = document.getElementById("shareCloseX");
+  function openShareModal() {
+    if (!shareModal) return;
+    shareModal.classList.add("open");
+    document.body.style.overflow = "hidden";
+    shareCloseX?.focus();
+  }
+  function closeShareModal() {
+    if (!shareModal) return;
+    shareModal.classList.remove("open");
+    document.body.style.overflow = "";
+    sendBtn?.focus();
+  }
+  shareCloseX?.addEventListener("click", closeShareModal);
+  shareModal?.addEventListener("click", (e) => {
+    if (e.target === shareModal) closeShareModal();
+  });
+
   sendBtn?.addEventListener("click", async () => {
     try {
       setStatus("busy", "Preparing file to send…");
@@ -2118,18 +2166,14 @@
         await navigator.share({
           files: [out.file],
           title: out.name,
-          text: "Shared from Lightdocs"
+          text: "Shared from LightDocs"
         });
-        setStatus("ok", "Shared — your file stayed on this device (not uploaded to Lightdocs).");
+        setStatus("ok", "Shared — your file stayed on this device (not uploaded to LightDocs).");
         return;
       }
-      // Fallback: download + open OrcaMail for the user to attach
-      triggerBlobDownload(out.blob, out.name);
-      window.open("https://orcamail.ai", "_blank", "noopener,noreferrer");
-      setStatus(
-        "ok",
-        "Downloaded · opening OrcaMail — attach the file there. Nothing was uploaded to Lightdocs."
-      );
+      pendingShare = out;
+      setStatus("", "");
+      openShareModal();
     } catch (e) {
       if (e && e.name === "AbortError") {
         setStatus("", "Share cancelled.");
@@ -2137,6 +2181,60 @@
       }
       setStatus("err", e.message || String(e));
     }
+  });
+
+  document.querySelectorAll("#modal-share [data-share]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const out = pendingShare;
+      const how = b.dataset.share;
+      if (!out && how !== "copy") {
+        closeShareModal();
+        setStatus("err", "Nothing to send yet.");
+        return;
+      }
+      const subj = encodeURIComponent(out ? out.name : "Document from LightDocs");
+      const body = encodeURIComponent(
+        "Sharing a document I made in LightDocs. (Attach the file that just downloaded.)"
+      );
+      try {
+        switch (how) {
+          case "email":
+            triggerBlobDownload(out.blob, out.name);
+            window.open(`mailto:?subject=${subj}&body=${body}`, "_blank", "noopener,noreferrer");
+            setStatus("ok", "Saved — attach it in your email. Nothing uploaded to LightDocs.");
+            break;
+          case "text":
+            triggerBlobDownload(out.blob, out.name);
+            window.open(`sms:?body=${body}`, "_blank", "noopener,noreferrer");
+            setStatus("ok", "Saved — attach it in your messaging app.");
+            break;
+          case "wechat":
+            triggerBlobDownload(out.blob, out.name);
+            setStatus("ok", "Saved — open WeChat and attach the file. Nothing uploaded to LightDocs.");
+            break;
+          case "orcamail":
+            triggerBlobDownload(out.blob, out.name);
+            window.open("https://orcamail.ai", "_blank", "noopener,noreferrer");
+            setStatus("ok", "Saved — opening OrcaMail. Attach the file there.");
+            break;
+          case "copy":
+            await navigator.clipboard.writeText(docEditor ? docEditor.getText() : (lastText || ""));
+            setStatus("ok", "Text copied.");
+            break;
+          case "download":
+          default:
+            triggerBlobDownload(out.blob, out.name);
+            setStatus("ok", "File saved.");
+        }
+      } catch (err) {
+        setStatus("err", err.message || String(err));
+      }
+      closeShareModal();
+    });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && shareModal?.classList.contains("open")) closeShareModal();
   });
 })();
 </script>

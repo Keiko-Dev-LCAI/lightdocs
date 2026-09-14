@@ -1065,7 +1065,25 @@
         markdownIt: md,
         onSelectImage: syncPhoneImgControls,
       });
-      // If we already have chart PNGs and empty-ish doc, leave as-is; user can insert
+      // Auto-place the generated chart as a selectable object so Size/Wrap/Recolor/Delete work,
+      // and so an edited Download keeps the chart (export rebuilds from editor blocks).
+      // Runs once per editor build (docEditor is destroyed on job-done; early-return if it exists).
+      try {
+        const chartSrc = lastChartThumb || chartPngDataUrls[0] || "";
+        if (chartSrc && lastChartSpec && typeof lastChartSpec === "object") {
+          docEditor.editor.chain().focus("start").run();
+          docEditor.insertImage({
+            src: chartSrc,
+            alt: (lastChartSpec.title || "chart"),
+            width: 420,
+            wrap: "full",
+            colors: Array.isArray(lastChartSpec.colors) && lastChartSpec.colors.length
+              ? lastChartSpec.colors.slice()
+              : (Array.isArray(chartColors) ? chartColors.slice() : null),
+            chartSpec: lastChartSpec
+          });
+        }
+      } catch (e) { console.warn("[lightdocs] auto-insert chart", e); }
       setBusy(false);
       copyBtn.disabled = !lastText && !(docEditor && docEditor.getText());
       downloadBtn.disabled = false;
@@ -2205,16 +2223,15 @@
       : "";
     syncEditorHints();
     localStorage.removeItem(JOB_KEY);
-    setBusy(false);
     setViewMode("preview");
 
+    // Prepare chart PNG/spec BEFORE clearing busy so Edit auto-insert has assets ready
     if (lastOutput === "png" && lastDownloadUrl) {
       try {
         const dataUrl = await urlToDataUrl(lastDownloadUrl);
         lastChartThumb = dataUrl;
         chartPngDataUrls = [dataUrl];
         if (!lastChartSpec) {
-          // Fallback: try parse text as JSON chart spec
           try {
             const parsed = JSON.parse(lastText || "");
             if (parsed && typeof parsed === "object" && (parsed.values || parsed.labels)) {
@@ -2229,21 +2246,16 @@
       }
       await renderPreview();
     } else if (lastOutput === "docx" && lastDownloadUrl) {
-      await renderPreview();
       await extractChartPngsFromDocx(lastDownloadUrl);
-      if (lastChartSpec && chartPngDataUrls[0]) {
-        lastChartThumb = chartPngDataUrls[0];
-        enableSaveChart(true);
-      } else if (chartPngDataUrls[0]) {
-        lastChartThumb = chartPngDataUrls[0];
-        // Spec may still be present from want_chart jobs
-        enableSaveChart(!!lastChartSpec);
-      }
+      if (chartPngDataUrls[0]) lastChartThumb = chartPngDataUrls[0];
+      enableSaveChart(!!(lastChartSpec && lastChartThumb));
+      await renderPreview();
     } else {
       chartPngDataUrls = [];
       if (lastChartSpec) enableSaveChart(true);
       await renderPreview();
     }
+    setBusy(false);
     queueAutosave();
   }
   function startPolling(jobId) {

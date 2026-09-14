@@ -203,6 +203,13 @@
   .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
   #docList { font-size: 14px; color: var(--text); font-weight: 600; line-height: 1.35; word-break: break-word; }
   #docList:not(:empty) { display: inline-block; margin-top: 10px; padding: 8px 12px; border: 1px solid var(--green); border-radius: 8px; background: rgba(76,175,125,0.14); }
+  .followup { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .follow-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .follow-ask { display: flex; gap: 8px; }
+  .follow-ask input {
+    flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 14px;
+  }
   .status {
     font-size: 13px; font-weight: 600; color: var(--text2); padding: 8px 10px; border-radius: 10px;
     background: rgba(255,255,255,0.04); border: 1px solid var(--border); line-height: 1.35;
@@ -717,6 +724,16 @@
             <button class="btn btn-ghost" id="downloadBtn" type="button" disabled>Download</button>
             <button class="btn btn-ghost" id="sendBtn" type="button" disabled title="Send / share — file stays on your device">Send</button>
           </div>
+          <div class="followup hidden" id="followBar">
+            <div class="follow-chips">
+              <button type="button" class="btn btn-ghost btn-sm" id="followSimpler">Explain simpler</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="followShorter">Shorter</button>
+            </div>
+            <div class="follow-ask">
+              <input type="text" id="followInput" placeholder="Ask a follow-up, or say how to change it…" aria-label="Ask a follow-up" />
+              <button type="button" class="btn btn-accent btn-sm" id="followAsk">Ask</button>
+            </div>
+          </div>
           <p class="hint" id="jobHint"></p>
         </div>
       </div>
@@ -859,6 +876,11 @@
   const viewPreviewBtn = document.getElementById("viewPreviewBtn");
   const viewEditBtn = document.getElementById("viewEditBtn");
   const viewRawBtn = document.getElementById("viewRawBtn");
+  const followBar = document.getElementById("followBar");
+  const followInput = document.getElementById("followInput");
+  const followAsk = document.getElementById("followAsk");
+  const followSimpler = document.getElementById("followSimpler");
+  const followShorter = document.getElementById("followShorter");
   const editorShell = document.getElementById("editorShell");
   const editorCanvas = document.getElementById("editorCanvas");
   const insertImageBtn = document.getElementById("insertImageBtn");
@@ -1813,6 +1835,7 @@
     if (d.propType) propType.value = d.propType;
     applyModeDefaults(); // rebuild allowed formats; snap invalid saved output to mode default
     lastText = d.resultText || "";
+    if (followBar) followBar.classList.toggle("hidden", !lastText);
     lastOutput = d.output || outfmt.value || "docx";
     lastDownloadUrl = "";
     result.textContent = lastText || "Result text shows here for Copy. Download delivers the real file.";
@@ -1848,6 +1871,7 @@
     if (result) result.textContent = "";
     if (preview) preview.innerHTML = '<p class="preview-fallback">Preview shows here after Generate. Raw text still powers Copy.</p>';
     if (docEditor) { try { docEditor.destroy(); } catch (_) {} docEditor = null; }
+    if (followBar) followBar.classList.add("hidden");
     setViewMode("preview");
     syncEditorHints();
     setBusy(false);
@@ -2039,6 +2063,7 @@
     setViewMode("preview");
     await renderPreview();
     setBusy(false);
+    if (followBar) followBar.classList.toggle("hidden", !lastText);
     queueAutosave();
   }
   function startPolling(jobId) {
@@ -2102,6 +2127,52 @@
     }
   })();
 
+  async function startFollowup(instruction) {
+    if (!API) { setStatus("err", "API URL missing."); return; }
+    const source = (lastText || "").trim();
+    if (!source) { setStatus("err", "Generate or open a document first."); return; }
+    const ask = (instruction || "").trim();
+    if (!ask) return;
+    if (followBar) followBar.classList.add("hidden");
+    setBusy(true);
+    setStatus("busy", "Working on your follow-up…");
+    try {
+      const fd = new FormData();
+      fd.append("mode", "explain");
+      fd.append("style", styleEl.value);
+      fd.append("output", "md");
+      fd.append("text", ask);
+      fd.append("doc_text", source);
+      fd.append("device_id", deviceId);
+      const waddr = connectedWallet();
+      if (waddr) fd.append("wallet", waddr);
+      const headers = { "X-Device-Id": deviceId };
+      if (waddr) headers["X-Wallet"] = waddr;
+      const r = await fetch(API + "/api/jobs", { method: "POST", body: fd, headers });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 402 || data.need_pay || data.need_wallet) {
+        throw new Error(data.error || "Subscribe or renew to keep going — connect wallet / $1 mo pass.");
+      }
+      if (!r.ok) throw new Error(data.error || "Could not start follow-up");
+      if (followInput) followInput.value = "";
+      setStatus("busy", "generating… AIVM may take 1–2 minutes.");
+      startPolling(data.job_id);
+      refreshPayConfig();
+    } catch (e) {
+      setStatus("err", e.message || String(e));
+      setBusy(false);
+    }
+  }
+
+  if (followAsk) followAsk.addEventListener("click", () => startFollowup(followInput ? followInput.value : ""));
+  if (followInput) followInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); startFollowup(followInput.value); }
+  });
+  if (followSimpler) followSimpler.addEventListener("click", () =>
+    startFollowup("Re-explain this in simpler, plain English that anyone could follow — short sentences, no jargon."));
+  if (followShorter) followShorter.addEventListener("click", () =>
+    startFollowup("Give a much shorter version — just the essential points, in plain English."));
+
   generate.addEventListener("click", async () => {
     if (!API) { setStatus("err", "API URL missing."); return; }
     const text = (input.value || "").trim();
@@ -2109,6 +2180,7 @@
       setStatus("err", "Paste notes, upload a document, or add at least one photo.");
       return;
     }
+    if (followBar) followBar.classList.add("hidden");
     lastText = ""; lastDownloadUrl = ""; lastOutput = outfmt.value;
     result.textContent = "";
     preview.innerHTML = '<p class="preview-fallback">Generating… preview will appear when ready.</p>';

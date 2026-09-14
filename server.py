@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 
 VALID_MODES = frozenset(
     {
@@ -894,6 +894,9 @@ def create_job():
                     data = f.read()
                     if data and len(data) < 20_000_000:
                         doc_texts.append(extract_document_text(f.filename, data))
+        dt = (request.form.get("doc_text") or "").strip()
+        if dt:
+            doc_texts.append(dt)
     else:
         body = request.get_json(silent=True) or {}
         text = (body.get("text") or "").strip()
@@ -911,6 +914,9 @@ def create_job():
                 images.append(base64.b64decode(raw))
             except Exception:
                 pass
+        dt = str(body.get("doc_text") or "").strip()
+        if dt:
+            doc_texts.append(dt)
 
     if output not in ("docx", "md", "xlsx", "pptx"):
         output = "docx"
@@ -924,7 +930,15 @@ def create_job():
     if doc_texts:
         joined = "\n\n".join(t.strip() for t in doc_texts if t and t.strip())
         if joined:
-            text = (text + "\n\n" + joined).strip() if text else joined
+            if text:
+                text = (
+                    "DOCUMENT (the material to work from):\n" + joined
+                    + "\n\nUSER INSTRUCTION / NOTES — apply ONLY to the DOCUMENT above. "
+                    "If a note does not relate to the document, ignore it completely and do "
+                    "NOT mention it or weave it into the output:\n" + text
+                )
+            else:
+                text = joined
     text = text[:60000]
 
     if not text and not images and not doc_texts:

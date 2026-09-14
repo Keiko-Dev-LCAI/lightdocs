@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.6.2"
+VERSION = "0.6.3"
 
 VALID_MODES = frozenset(
     {
@@ -165,6 +165,26 @@ def ocr_image_bytes(data: bytes) -> str:
         return ""
 
 
+def _is_unavailable_reply(text: str) -> bool:
+    """The relay sometimes returns an outage apology as a normal 'done' reply.
+    Treat a short body containing these markers as a failure, not a document."""
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    # Only trip on SHORT bodies so a legitimate long doc that mentions
+    # these words is never misclassified.
+    if len(low) > 400:
+        return False
+    markers = (
+        "temporarily unavailable",
+        "network or aivm issue",
+        "aivm is unavailable",
+        "the ai is temporarily",
+        "service is unavailable",
+    )
+    return any(m in low for m in markers)
+
+
 def aivm_infer(prompt: str, timeout: int = 240) -> str:
     start = requests.post(
         f"{AIVM_RELAY}/api/chat",
@@ -176,7 +196,12 @@ def aivm_infer(prompt: str, timeout: int = 240) -> str:
     data = start.json()
     job_id = data.get("job_id")
     if not job_id:
-        return (data.get("reply") or data.get("message") or "").strip()
+        reply = (data.get("reply") or data.get("message") or "").strip()
+        if _is_unavailable_reply(reply):
+            raise RuntimeError(
+                "The AI service is temporarily unavailable. Please try again in a moment."
+            )
+        return reply
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(5)
@@ -189,7 +214,12 @@ def aivm_infer(prompt: str, timeout: int = 240) -> str:
             raise RuntimeError(f"AIVM poll failed: {poll.status_code}")
         pd = poll.json()
         if pd.get("status") == "done":
-            return (pd.get("reply") or "").strip()
+            reply = (pd.get("reply") or "").strip()
+            if _is_unavailable_reply(reply):
+                raise RuntimeError(
+                    "The AI service is temporarily unavailable. Please try again in a moment."
+                )
+            return reply
         if pd.get("status") == "error":
             raise RuntimeError(pd.get("error") or "AIVM job failed")
     raise RuntimeError("AIVM timed out — try again")

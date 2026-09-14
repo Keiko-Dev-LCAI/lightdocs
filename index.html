@@ -1634,7 +1634,7 @@
     outHint.textContent = OUT_HINTS[outfmt.value] || "";
   }
   modeEl.addEventListener("change", () => {
-    if (lastText || lastDownloadUrl) clearWorkspace();
+    if (input.value.trim() || imageFiles.length || docFiles.length || lastText || lastDownloadUrl) clearWorkspace();
     applyModeDefaults();
     queueAutosave();
   });

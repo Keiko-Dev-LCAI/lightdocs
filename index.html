@@ -332,6 +332,7 @@
   .ld-editor-prose { outline: none; min-height: 80px; line-height: 1.45; font-size: 14px; }
   .ld-editor-prose h1, .ld-editor-prose h2, .ld-editor-prose h3 { margin: 0.6em 0 0.35em; color: #14152C; }
   .ld-editor-prose p, .ld-editor-prose li { margin: 0.35em 0; }
+  .ld-editor-prose ol, .ld-editor-prose ul { padding-left: 1.6em; margin: 0.35em 0; }
   .doc-image-node {
     position: relative; width: fit-content; max-width: 100%; margin: 12px 0;
     border: 2px solid transparent; border-radius: 8px; padding: 4px;
@@ -361,6 +362,8 @@
   .obj-controls select, .obj-controls input[type="range"] {
     min-height: 40px; width: auto; flex: 1; min-width: 100px;
   }
+  .obj-align { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+  .obj-align .btn.is-active { border-color: var(--purple); background: #eef0ff; color: #14152C; }
   #editorHint { flex-shrink: 0; }
   #jobHint { flex-shrink: 0; }
   @media (max-width: 719px) {
@@ -368,6 +371,7 @@
   }
   .preview-pane h1, .preview-pane h2, .preview-pane h3 { color: #14152C; margin: 0.6em 0 0.35em; }
   .preview-pane p, .preview-pane li { margin: 0.35em 0; }
+  .preview-pane ol, .preview-pane ul { padding-left: 1.6em; margin: 0.35em 0; }
   .preview-pane a { color: #5B4BFF; }
   .preview-pane table {
     width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; background: #fff;
@@ -644,13 +648,12 @@
             <div class="obj-controls" id="objControls" aria-label="Selected object controls">
               <label for="imgSizeRange">Size</label>
               <input type="range" id="imgSizeRange" min="100" max="560" value="320">
-              <label for="imgWrapSelect">Wrap</label>
-              <select id="imgWrapSelect">
-                <option value="full">Center</option>
-                <option value="left">Wrap left</option>
-                <option value="right">Wrap right</option>
-                <option value="inline">Inline</option>
-              </select>
+              <span class="obj-align" role="group" aria-label="Image position">
+                <button type="button" class="btn btn-ghost btn-sm" data-wrap="left" title="Align left, text wraps right">◧ Left</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-wrap="full" title="Center">▬ Center</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-wrap="right" title="Align right, text wraps left">◨ Right</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-wrap="inline" title="Inline with text">↕ Inline</button>
+              </span>
               <button type="button" class="btn btn-ghost btn-sm" id="imgMoveUpBtn">Move up</button>
               <button type="button" class="btn btn-ghost btn-sm" id="imgMoveDownBtn">Move down</button>
               <button type="button" class="btn btn-ghost btn-sm" id="imgDeleteBtn">Delete</button>
@@ -792,7 +795,6 @@
   const objControls = document.getElementById("objControls");
   const phoneImgControls = objControls; // alias for any leftover refs
   const imgSizeRange = document.getElementById("imgSizeRange");
-  const imgWrapSelect = document.getElementById("imgWrapSelect");
   const imgMoveUpBtn = document.getElementById("imgMoveUpBtn");
   const imgMoveDownBtn = document.getElementById("imgMoveDownBtn");
   const imgDeleteBtn = document.getElementById("imgDeleteBtn");
@@ -976,11 +978,15 @@
     if (!objControls) return;
     if (!sel) {
       objControls.classList.remove("show");
+      document.querySelectorAll(".obj-align [data-wrap]").forEach((b) => b.classList.remove("is-active"));
       return;
     }
     objControls.classList.add("show");
     if (imgSizeRange) imgSizeRange.value = String(sel.width || 320);
-    if (imgWrapSelect) imgWrapSelect.value = sel.wrap || "full";
+    const w = sel.wrap || "full";
+    document.querySelectorAll(".obj-align [data-wrap]").forEach((b) => {
+      b.classList.toggle("is-active", b.dataset.wrap === w);
+    });
   }
 
   function syncEditorHints() {
@@ -1055,9 +1061,13 @@
     if (!docEditor) return;
     docEditor.setImageAttrs({ width: parseInt(imgSizeRange.value, 10) || 320 });
   });
-  imgWrapSelect.addEventListener("change", () => {
-    if (!docEditor) return;
-    docEditor.setImageAttrs({ wrap: imgWrapSelect.value });
+  document.querySelectorAll(".obj-align [data-wrap]").forEach((b) => {
+    b.addEventListener("click", () => {
+      if (docEditor) docEditor.setImageAttrs({ wrap: b.dataset.wrap });
+      document.querySelectorAll(".obj-align [data-wrap]").forEach((x) => {
+        x.classList.toggle("is-active", x === b);
+      });
+    });
   });
   imgMoveUpBtn.addEventListener("click", () => docEditor && docEditor.moveImage(-1));
   imgMoveDownBtn.addEventListener("click", () => docEditor && docEditor.moveImage(1));
@@ -1089,11 +1099,22 @@
     if (ed.editor.state.selection.empty) c.selectAll();
     c.setFontFamily(fmtFont.value).run();
   }));
-  if (fmtColor) fmtColor.addEventListener("input", () => withEditor((ed) => {
-    const c = ed.chain();
-    if (ed.editor.state.selection.empty) c.selectAll();
-    c.setColor(fmtColor.value).run();
-  }));
+  if (fmtColor) {
+    let colorSel = null;
+    const snapColorSel = () => {
+      if (!docEditor) return;
+      const s = docEditor.editor.state.selection;
+      colorSel = s.empty ? null : { from: s.from, to: s.to };
+    };
+    fmtColor.addEventListener("mousedown", snapColorSel);
+    fmtColor.addEventListener("focus", snapColorSel);
+    fmtColor.addEventListener("input", () => withEditor((ed) => {
+      const c = ed.chain();
+      if (colorSel) c.setTextSelection(colorSel);
+      else c.selectAll();
+      c.setColor(fmtColor.value).run();
+    }));
+  }
 
   if (editorExpandBtn) {
     editorExpandBtn.addEventListener("click", async () => {

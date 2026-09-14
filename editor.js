@@ -4,7 +4,7 @@
  */
 const ESM = (pkg) => `https://esm.sh/${pkg}`;
 
-function isPhone() {
+export function isPhone() {
   return window.matchMedia && window.matchMedia("(max-width: 719px)").matches;
 }
 
@@ -22,13 +22,64 @@ function markdownToHtml(md, markdownIt) {
 
 async function loadTiptap() {
   const [
-    { Editor, Node, mergeAttributes },
+    core,
     { default: StarterKit },
+    { default: TextStyle },
+    { default: Color },
+    { FontFamily },
+    { Underline },
   ] = await Promise.all([
     import(ESM("@tiptap/core@2.11.5")),
     import(ESM("@tiptap/starter-kit@2.11.5")),
+    import(ESM("@tiptap/extension-text-style@2.11.5")),
+    import(ESM("@tiptap/extension-color@2.11.5")),
+    import(ESM("@tiptap/extension-font-family@2.11.5")),
+    import(ESM("@tiptap/extension-underline@2.11.5")),
   ]);
-  return { Editor, Node, mergeAttributes, StarterKit };
+  return {
+    Editor: core.Editor,
+    Node: core.Node,
+    Extension: core.Extension,
+    mergeAttributes: core.mergeAttributes,
+    StarterKit,
+    TextStyle,
+    Color,
+    FontFamily,
+    Underline,
+  };
+}
+
+function createFontSize({ Extension }) {
+  return Extension.create({
+    name: "fontSize",
+    addGlobalAttributes() {
+      return [
+        {
+          types: ["textStyle"],
+          attributes: {
+            fontSize: {
+              default: null,
+              parseHTML: (el) => el.style.fontSize?.replace(/['"]+/g, "") || null,
+              renderHTML: (attrs) =>
+                attrs.fontSize ? { style: `font-size: ${attrs.fontSize}` } : {},
+            },
+          },
+        },
+      ];
+    },
+    addCommands() {
+      return {
+        setFontSize:
+          (fontSize) =>
+          ({ chain }) =>
+            chain().setMark("textStyle", { fontSize }).run(),
+        unsetFontSize:
+          () =>
+          ({ chain }) =>
+            chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
+      };
+    },
+  });
 }
 
 function createDocImage({ Node, mergeAttributes }) {
@@ -42,7 +93,9 @@ function createDocImage({ Node, mergeAttributes }) {
         src: { default: null },
         alt: { default: "image" },
         width: { default: 320 },
-        wrap: { default: "full" }, // inline | left | right | full
+        wrap: { default: "full" },
+        colors: { default: null },
+        chartSpec: { default: null },
       };
     },
     parseHTML() {
@@ -89,7 +142,6 @@ function createDocImage({ Node, mergeAttributes }) {
           select();
         });
 
-        // Desktop corner resize
         let resizing = false;
         let startX = 0;
         let startW = 0;
@@ -105,14 +157,10 @@ function createDocImage({ Node, mergeAttributes }) {
         });
         dom.addEventListener("pointermove", (e) => {
           if (!resizing) return;
-          const corner = e.target.dataset?.corner || "se";
+          const corner = e.target?.dataset?.corner || "se";
           const dx = e.clientX - startX;
-          const free = e.shiftKey;
           let next = startW + (corner.includes("w") ? -dx : dx);
           next = Math.max(80, Math.min(next, 720));
-          if (!free) {
-            // aspect locked by CSS height:auto
-          }
           img.style.width = next + "px";
           if (typeof getPos === "function") {
             editor.view.dispatch(
@@ -146,32 +194,62 @@ function createDocImage({ Node, mergeAttributes }) {
   });
 }
 
+function collectMarks(node) {
+  const marks = {};
+  (node.marks || []).forEach((m) => {
+    if (m.type.name === "bold") marks.bold = true;
+    if (m.type.name === "italic") marks.italic = true;
+    if (m.type.name === "underline") marks.underline = true;
+    if (m.type.name === "textStyle") {
+      if (m.attrs.color) marks.color = m.attrs.color;
+      if (m.attrs.fontFamily) marks.font = m.attrs.fontFamily;
+      if (m.attrs.fontSize) {
+        const n = parseInt(String(m.attrs.fontSize), 10);
+        if (n) marks.fontSize = n;
+      }
+    }
+  });
+  return marks;
+}
+
+function blockFromTextNode(parentType, textNode, level) {
+  // unused helper placeholder
+  return null;
+}
+
 /**
- * @param {object} opts
- * @param {HTMLElement} opts.element
- * @param {string} opts.markdown
- * @param {object} [opts.markdownIt]
- * @param {(sel: object|null) => void} [opts.onSelectImage]
- * @returns {Promise<{editor, getBlocks, getText, insertImage, setImageAttrs, destroy}>}
+ * @returns {Promise<{editor, getBlocks, getText, insertImage, setImageAttrs, moveImage, destroy, chain}>}
  */
 export async function createLightdocsEditor(opts) {
-  const { Editor, Node, mergeAttributes, StarterKit } = await loadTiptap();
+  const {
+    Editor,
+    Node,
+    Extension,
+    mergeAttributes,
+    StarterKit,
+    TextStyle,
+    Color,
+    FontFamily,
+    Underline,
+  } = await loadTiptap();
   const DocImage = createDocImage({ Node, mergeAttributes });
+  const FontSize = createFontSize({ Extension });
   const html = markdownToHtml(opts.markdown || "", opts.markdownIt);
 
   const editor = new Editor({
     element: opts.element,
     extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-      }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      TextStyle,
+      Color,
+      FontFamily,
+      FontSize,
+      Underline,
       DocImage,
     ],
     content: html || "<p></p>",
     editorProps: {
-      attributes: {
-        class: "ld-editor-prose",
-      },
+      attributes: { class: "ld-editor-prose" },
     },
     onSelectionUpdate: ({ editor: ed }) => {
       const sel = ed.state.selection;
@@ -181,6 +259,8 @@ export async function createLightdocsEditor(opts) {
             width: sel.node.attrs.width,
             wrap: sel.node.attrs.wrap,
             alt: sel.node.attrs.alt,
+            colors: sel.node.attrs.colors,
+            chartSpec: sel.node.attrs.chartSpec,
             pos: sel.from,
           });
       } else {
@@ -188,6 +268,24 @@ export async function createLightdocsEditor(opts) {
       }
     },
   });
+
+  function runsFromInline(node) {
+    const runs = [];
+    node.forEach((child) => {
+      if (child.isText) {
+        runs.push({ text: child.text || "", ...collectMarks(child) });
+      } else if (child.isTextblock || child.childCount) {
+        // nested
+        child.forEach((c2) => {
+          if (c2.isText) runs.push({ text: c2.text || "", ...collectMarks(c2) });
+        });
+      }
+    });
+    if (!runs.length && node.textContent) {
+      runs.push({ text: node.textContent });
+    }
+    return runs;
+  }
 
   function getBlocks() {
     const blocks = [];
@@ -197,14 +295,15 @@ export async function createLightdocsEditor(opts) {
           type: "heading",
           level: node.attrs.level || 1,
           text: node.textContent,
+          runs: runsFromInline(node),
         });
       } else if (node.type.name === "bulletList") {
         node.forEach((li) => {
-          blocks.push({ type: "bullet", text: li.textContent });
+          blocks.push({ type: "bullet", text: li.textContent, runs: runsFromInline(li) });
         });
       } else if (node.type.name === "orderedList") {
         node.forEach((li) => {
-          blocks.push({ type: "number", text: li.textContent });
+          blocks.push({ type: "number", text: li.textContent, runs: runsFromInline(li) });
         });
       } else if (node.type.name === "docImage") {
         const wpx = node.attrs.width || 320;
@@ -214,27 +313,41 @@ export async function createLightdocsEditor(opts) {
           alt: node.attrs.alt || "image",
           width_in: Math.max(0.8, Math.min(wpx / 96, 6.5)),
           wrap: node.attrs.wrap || "full",
+          colors: node.attrs.colors || null,
+          chartSpec: node.attrs.chartSpec || null,
         });
       } else if (node.type.name === "paragraph") {
-        blocks.push({ type: "paragraph", text: node.textContent });
+        blocks.push({
+          type: "paragraph",
+          text: node.textContent,
+          runs: runsFromInline(node),
+        });
       } else if (node.isTextblock) {
-        blocks.push({ type: "paragraph", text: node.textContent });
+        blocks.push({
+          type: "paragraph",
+          text: node.textContent,
+          runs: runsFromInline(node),
+        });
       }
     });
-    return blocks.filter((b) => b.type === "image" || (b.text && b.text.trim()) || b.type === "paragraph");
+    return blocks.filter(
+      (b) => b.type === "image" || (b.text && b.text.trim()) || (b.runs && b.runs.length)
+    );
   }
 
-  function insertImage({ src, alt, width, wrap }) {
+  function insertImage(attrs) {
     editor
       .chain()
       .focus()
       .insertContent({
         type: "docImage",
         attrs: {
-          src,
-          alt: alt || "image",
-          width: width || 320,
-          wrap: wrap || "full",
+          src: attrs.src,
+          alt: attrs.alt || "image",
+          width: attrs.width || 320,
+          wrap: attrs.wrap || "full",
+          colors: attrs.colors || null,
+          chartSpec: attrs.chartSpec || null,
         },
       })
       .run();
@@ -243,11 +356,7 @@ export async function createLightdocsEditor(opts) {
   function setImageAttrs(attrs) {
     const sel = editor.state.selection;
     if (!(sel.node && sel.node.type.name === "docImage")) return false;
-    editor
-      .chain()
-      .focus()
-      .updateAttributes("docImage", attrs)
-      .run();
+    editor.chain().focus().updateAttributes("docImage", attrs).run();
     return true;
   }
 
@@ -255,44 +364,50 @@ export async function createLightdocsEditor(opts) {
     const { state } = editor;
     const sel = state.selection;
     if (!(sel.node && sel.node.type.name === "docImage")) return;
-    const pos = sel.from;
     const node = sel.node;
-    let tr = state.tr.delete(pos, pos + node.nodeSize);
-    const insertAt =
-      dir < 0
-        ? Math.max(1, pos - 1)
-        : Math.min(tr.doc.content.size, pos + 1);
-    // simpler: swap with adjacent block via commands
     if (dir < 0) {
-      editor.commands.liftEmptyBlock?.();
-      editor.chain().focus().command(({ tr: t, dispatch }) => {
-        const p = sel.from;
-        if (p <= 1) return false;
-        const $pos = t.doc.resolve(p);
-        const before = $pos.nodeBefore;
-        if (!before) return false;
-        const from = p - before.nodeSize;
-        const slice = t.doc.slice(from, p + node.nodeSize);
-        // fallback: delete and insert before
-        t.delete(from, p + node.nodeSize);
-        t.insert(from, node);
-        if (dispatch) dispatch(t);
-        return true;
-      }).run();
+      editor
+        .chain()
+        .focus()
+        .command(({ tr, dispatch }) => {
+          const p = sel.from;
+          if (p <= 1) return false;
+          const $pos = tr.doc.resolve(p);
+          const before = $pos.nodeBefore;
+          if (!before) return false;
+          const from = p - before.nodeSize;
+          tr.delete(from, p + node.nodeSize);
+          tr.insert(from, node.copy(node.content));
+          tr.insert(from + node.nodeSize, before);
+          if (dispatch) dispatch(tr);
+          return true;
+        })
+        .run();
     } else {
-      editor.chain().focus().command(({ tr: t, dispatch }) => {
-        const p = sel.from;
-        const afterPos = p + node.nodeSize;
-        const $pos = t.doc.resolve(afterPos);
-        const after = $pos.nodeAfter;
-        if (!after) return false;
-        t.delete(p, afterPos + after.nodeSize);
-        t.insert(p, after);
-        t.insert(p + after.nodeSize, node);
-        if (dispatch) dispatch(t);
-        return true;
-      }).run();
+      editor
+        .chain()
+        .focus()
+        .command(({ tr, dispatch }) => {
+          const p = sel.from;
+          const afterPos = p + node.nodeSize;
+          const $pos = tr.doc.resolve(afterPos);
+          const after = $pos.nodeAfter;
+          if (!after) return false;
+          tr.delete(p, afterPos + after.nodeSize);
+          tr.insert(p, after);
+          tr.insert(p + after.nodeSize, node.copy(node.content));
+          if (dispatch) dispatch(tr);
+          return true;
+        })
+        .run();
     }
+  }
+
+  function deleteSelectedImage() {
+    const sel = editor.state.selection;
+    if (!(sel.node && sel.node.type.name === "docImage")) return false;
+    editor.chain().focus().deleteSelection().run();
+    return true;
   }
 
   return {
@@ -302,6 +417,8 @@ export async function createLightdocsEditor(opts) {
     insertImage,
     setImageAttrs,
     moveImage,
+    deleteSelectedImage,
+    chain: () => editor.chain().focus(),
     destroy: () => editor.destroy(),
     isPhone,
   };

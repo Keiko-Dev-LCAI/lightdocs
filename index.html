@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#5B4BFF">
 <title>Lightdocs — Notes → Docs</title>
 <script>window.LIGHTDOCS_API = window.LIGHTDOCS_API || "https://lightdocs-production.up.railway.app";</script>
+<script src="./keiko-pay.js" defer></script>
 <style>
   :root {
     --lc-primary: #5B4BFF;
@@ -254,17 +255,41 @@
     border-radius: 12px; padding: 16px 18px; border: 1px solid var(--border);
   }
   .editor-shell {
-    flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; min-height: 120px;
+    flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; min-height: 220px;
+    position: relative;
   }
   .editor-toolbar {
     display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex-shrink: 0;
   }
-  .editor-toolbar .btn-sm { min-height: 36px; }
+  .editor-toolbar .btn-sm { min-height: 44px; }
+  .editor-toolbar select, .editor-toolbar input[type="color"] {
+    min-height: 44px; width: auto; min-width: 44px; padding: 6px 8px;
+  }
   .editor-canvas {
-    flex: 1 1 auto; min-height: 120px; overflow: auto;
+    flex: 1 1 auto; min-height: 220px; overflow: auto;
     background: #f7f7fb; color: #14152C; border: 1px solid var(--border);
     border-radius: 10px; padding: 10px 12px;
   }
+  @media (min-width: 960px) {
+    .editor-shell { min-height: 280px; }
+    .editor-canvas { min-height: 280px; }
+  }
+  .editor-expand-btn {
+    position: absolute; top: 8px; right: 8px; z-index: 2;
+    min-height: 44px; min-width: 44px;
+  }
+  .wallet-bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 12px;
+    background: rgba(91,75,255,0.08);
+  }
+  .wallet-bar .hint { margin: 0; }
+  .palette-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .palette-swatch {
+    width: 28px; height: 28px; min-width: 28px; min-height: 28px; border-radius: 6px;
+    border: 2px solid #fff; box-shadow: 0 0 0 1px var(--border); cursor: pointer; padding: 0;
+  }
+  .palette-swatch.active { outline: 2px solid var(--focus); outline-offset: 1px; }
   .ld-editor-prose { outline: none; min-height: 80px; line-height: 1.45; font-size: 14px; }
   .ld-editor-prose h1, .ld-editor-prose h2, .ld-editor-prose h3 { margin: 0.6em 0 0.35em; color: #14152C; }
   .ld-editor-prose p, .ld-editor-prose li { margin: 0.35em 0; }
@@ -377,6 +402,16 @@
       </header>
     </div>
 
+    <div class="wallet-bar" id="walletBar">
+      <button type="button" class="btn btn-ghost btn-sm" id="walletConnectBtn">Connect wallet</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="walletTopupBtn" hidden>Top up credits</button>
+      <select id="payCurrency" aria-label="Pay currency" style="width:auto;min-width:110px">
+        <option value="KEIKO">KEIKO</option>
+        <option value="LCAI">LCAI</option>
+      </select>
+      <span class="hint" id="walletStatus">Wallet login is device-local — we don’t keep your address.</span>
+    </div>
+
     <div class="workspace">
       <div class="col">
         <div class="card grow">
@@ -475,6 +510,14 @@
                 <option value="line">Line</option>
                 <option value="pie">Pie</option>
               </select>
+              <label class="field" style="margin-top:8px">Chart colors</label>
+              <div class="palette-row" id="chartPaletteRow" role="group" aria-label="Chart color palette">
+                <button type="button" class="palette-swatch active" data-palette="brand" style="background:linear-gradient(135deg,#5B4BFF,#DD00AC)" title="LightChat brand" aria-label="Brand palette"></button>
+                <button type="button" class="palette-swatch" data-palette="ocean" style="background:linear-gradient(135deg,#0ea5e9,#22c55e)" title="Ocean" aria-label="Ocean palette"></button>
+                <button type="button" class="palette-swatch" data-palette="warm" style="background:linear-gradient(135deg,#f59e0b,#ef4444)" title="Warm" aria-label="Warm palette"></button>
+                <button type="button" class="palette-swatch" data-palette="mono" style="background:linear-gradient(135deg,#111827,#9ca3af)" title="Mono" aria-label="Mono palette"></button>
+                <input type="color" id="chartCustomColor" value="#5B4BFF" aria-label="Custom chart color" title="Custom color">
+              </div>
             </div>
           </div>
           <p class="hint" id="modeHint">Phone photo or paste handwritten notes → clean Word-style notes.</p>
@@ -533,9 +576,28 @@
             </div>
           </div>
           <div class="editor-shell hidden" id="editorShell" aria-label="Document editor">
-            <div class="editor-toolbar" role="toolbar" aria-label="Editor inserts">
+            <button type="button" class="btn btn-ghost btn-sm editor-expand-btn" id="editorExpandBtn"
+              aria-label="Expand editor to full screen" aria-expanded="false">Expand</button>
+            <div class="editor-toolbar" role="toolbar" aria-label="Text formatting">
+              <button type="button" class="btn btn-ghost btn-sm" id="fmtBold" aria-label="Bold"><strong>B</strong></button>
+              <button type="button" class="btn btn-ghost btn-sm" id="fmtItalic" aria-label="Italic"><em>I</em></button>
+              <button type="button" class="btn btn-ghost btn-sm" id="fmtUnderline" aria-label="Underline"><u>U</u></button>
+              <select id="fmtSize" aria-label="Font size">
+                <option value="">Size</option>
+                <option value="12px">Small</option>
+                <option value="16px" selected>Normal</option>
+                <option value="20px">Large</option>
+                <option value="28px">Heading</option>
+              </select>
+              <select id="fmtFont" aria-label="Font family">
+                <option value="Inter, sans-serif">Inter</option>
+                <option value="Georgia, serif">Georgia</option>
+                <option value="'Courier New', monospace">Courier</option>
+                <option value="system-ui, sans-serif">System</option>
+              </select>
+              <input type="color" id="fmtColor" value="#14152C" aria-label="Font color" title="Font color">
               <button type="button" class="btn btn-ghost btn-sm" id="insertImageBtn">Add image</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="insertChartBtn">Add chart PNG</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="insertChartBtn">Add chart</button>
               <input type="file" id="editorImageFile" accept="image/*" hidden aria-label="Upload image for editor">
             </div>
             <div class="phone-img-controls" id="phoneImgControls">
@@ -550,6 +612,9 @@
               </select>
               <button type="button" class="btn btn-ghost btn-sm" id="imgMoveUpBtn">Move up</button>
               <button type="button" class="btn btn-ghost btn-sm" id="imgMoveDownBtn">Move down</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="imgDeleteBtn">Delete</button>
+              <label for="imgRecolor">Recolor</label>
+              <input type="color" id="imgRecolor" value="#5B4BFF" aria-label="Recolor selected chart">
             </div>
             <div class="editor-canvas" id="editorCanvas"></div>
             <p class="hint">Edit text and place charts/images. Download rebuilds a real Word file from this layout.</p>
@@ -585,6 +650,22 @@
   const DRAFT_DB = "lightdocs_drafts_v1";
   const DRAFT_STORE = "projects";
   const AUTOSAVE_ID = "autosave";
+  const DEVICE_KEY = "lightdocs_device_id_v1";
+  const WALLET_KEY = "lightdocs_wallet_v1";
+  const PALETTES = {
+    brand: ["#5B4BFF", "#DD00AC", "#7B6CFF", "#EE11FB", "#4A3CE0", "#CCCEEF"],
+    ocean: ["#0ea5e9", "#22c55e", "#06b6d4", "#14b8a6", "#3b82f6"],
+    warm: ["#f59e0b", "#ef4444", "#f97316", "#eab308", "#dc2626"],
+    mono: ["#111827", "#4b5563", "#9ca3af", "#d1d5db", "#374151"]
+  };
+  let selectedPalette = "brand";
+  let chartColors = PALETTES.brand.slice();
+  let payConfig = null;
+  let deviceId = localStorage.getItem(DEVICE_KEY);
+  if (!deviceId) {
+    deviceId = "dev_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem(DEVICE_KEY, deviceId);
+  }
 
   const modeEl = document.getElementById("mode");
   const styleEl = document.getElementById("style");
@@ -607,6 +688,7 @@
   const fsOverlay = document.getElementById("fsOverlay");
   const fsBody = document.getElementById("fsBody");
   const fsCloseBtn = document.getElementById("fsCloseBtn");
+  const fsTitle = document.getElementById("fsTitle");
   const viewPreviewBtn = document.getElementById("viewPreviewBtn");
   const viewEditBtn = document.getElementById("viewEditBtn");
   const viewRawBtn = document.getElementById("viewRawBtn");
@@ -615,11 +697,25 @@
   const insertImageBtn = document.getElementById("insertImageBtn");
   const insertChartBtn = document.getElementById("insertChartBtn");
   const editorImageFile = document.getElementById("editorImageFile");
+  const editorExpandBtn = document.getElementById("editorExpandBtn");
   const phoneImgControls = document.getElementById("phoneImgControls");
   const imgSizeRange = document.getElementById("imgSizeRange");
   const imgWrapSelect = document.getElementById("imgWrapSelect");
   const imgMoveUpBtn = document.getElementById("imgMoveUpBtn");
   const imgMoveDownBtn = document.getElementById("imgMoveDownBtn");
+  const imgDeleteBtn = document.getElementById("imgDeleteBtn");
+  const imgRecolor = document.getElementById("imgRecolor");
+  const fmtBold = document.getElementById("fmtBold");
+  const fmtItalic = document.getElementById("fmtItalic");
+  const fmtUnderline = document.getElementById("fmtUnderline");
+  const fmtSize = document.getElementById("fmtSize");
+  const fmtFont = document.getElementById("fmtFont");
+  const fmtColor = document.getElementById("fmtColor");
+  const walletConnectBtn = document.getElementById("walletConnectBtn");
+  const walletTopupBtn = document.getElementById("walletTopupBtn");
+  const walletStatus = document.getElementById("walletStatus");
+  const payCurrency = document.getElementById("payCurrency");
+  const chartCustomColor = document.getElementById("chartCustomColor");
   const copyBtn = document.getElementById("copyBtn");
   const downloadBtn = document.getElementById("downloadBtn");
   const jobHint = document.getElementById("jobHint");
@@ -723,15 +819,28 @@
   viewEditBtn.addEventListener("click", () => setViewMode("edit"));
   viewRawBtn.addEventListener("click", () => setViewMode("raw"));
 
+  let fsMode = "preview"; // preview | editor
   function openFullscreenPreview() {
+    fsMode = "preview";
     fsBody.innerHTML = "";
     Array.from(preview.childNodes).forEach((n) => fsBody.appendChild(n.cloneNode(true)));
+    if (fsTitle) fsTitle.textContent = "Document preview";
     fsOverlay.classList.add("open");
     document.body.style.overflow = "hidden";
     previewExpandBtn.setAttribute("aria-expanded", "true");
     fsCloseBtn.focus();
   }
   function closeFullscreenPreview() {
+    if (fsMode === "editor") {
+      while (fsBody.firstChild) {
+        const wrap = fsBody.firstChild;
+        while (wrap.firstChild) editorCanvas.appendChild(wrap.firstChild);
+        fsBody.removeChild(wrap);
+      }
+      if (editorExpandBtn) editorExpandBtn.setAttribute("aria-expanded", "false");
+      if (fsTitle) fsTitle.textContent = "Document preview";
+      fsMode = "preview";
+    }
     fsOverlay.classList.remove("open");
     document.body.style.overflow = "";
     previewExpandBtn.setAttribute("aria-expanded", "false");
@@ -818,22 +927,55 @@
   insertChartBtn.addEventListener("click", async () => {
     await ensureEditor();
     if (!docEditor) return;
-    if (chartPngDataUrls.length) {
+    if (!API) {
+      setStatus("err", "API missing — cannot render chart.");
+      return;
+    }
+    // Prefer rendering from current notes / lastText numbers
+    const srcText = (input.value || lastText || "").trim();
+    const nums = (srcText.match(/-?\d+(?:\.\d+)?/g) || []).slice(0, 12).map(Number);
+    if (nums.length < 2 && !chartPngDataUrls.length) {
+      setStatus("err", "Need clear numbers in notes (or Generate with Add a chart first).");
+      return;
+    }
+    try {
+      setStatus("busy", "Rendering chart…");
+      let dataUrl = chartPngDataUrls[0] || null;
+      let spec = null;
+      if (nums.length >= 2) {
+        const ctype = (chartType.value === "auto" ? "pie" : chartType.value) || "pie";
+        spec = {
+          type: ctype,
+          title: "Values",
+          labels: nums.map((_, i) => "Item " + (i + 1)),
+          values: nums,
+          colors: chartColors.slice()
+        };
+        const r = await fetch(API + "/api/render-chart", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(spec)
+        });
+        if (!r.ok) throw new Error("Chart render failed");
+        const blob = await r.blob();
+        dataUrl = await new Promise((resolve) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(fr.result);
+          fr.readAsDataURL(blob);
+        });
+      }
       docEditor.insertImage({
-        src: chartPngDataUrls[0],
+        src: dataUrl,
         alt: "chart",
         width: 420,
         wrap: "full",
+        colors: chartColors.slice(),
+        chartSpec: spec
       });
-      setStatus("ok", "Inserted chart image. Drag/resize on desktop, or use size/wrap on phone.");
-      return;
+      setStatus("ok", "Chart inserted at cursor — drag/resize (desktop) or use phone controls.");
+    } catch (e) {
+      setStatus("err", e.message || String(e));
     }
-    // Try render a simple chart from lastText numbers via API if want_chart style data present
-    if (!API) {
-      setStatus("err", "No chart image yet — Generate with “Add a chart” first, or Add image.");
-      return;
-    }
-    setStatus("busy", "No chart on hand — Generate with Add a chart, or add an image.");
   });
 
   imgSizeRange.addEventListener("input", () => {
@@ -846,6 +988,195 @@
   });
   imgMoveUpBtn.addEventListener("click", () => docEditor && docEditor.moveImage(-1));
   imgMoveDownBtn.addEventListener("click", () => docEditor && docEditor.moveImage(1));
+  if (imgDeleteBtn) {
+    imgDeleteBtn.addEventListener("click", () => {
+      if (docEditor && docEditor.deleteSelectedImage) docEditor.deleteSelectedImage();
+      syncPhoneImgControls(null);
+    });
+  }
+
+  // Chart palettes
+  document.querySelectorAll("#chartPaletteRow .palette-swatch").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#chartPaletteRow .palette-swatch").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      selectedPalette = btn.dataset.palette || "brand";
+      chartColors = (PALETTES[selectedPalette] || PALETTES.brand).slice();
+    });
+  });
+  if (chartCustomColor) {
+    chartCustomColor.addEventListener("change", () => {
+      chartColors = [chartCustomColor.value].concat(chartColors.slice(1));
+    });
+  }
+
+  // Text formatting
+  function withEditor(fn) {
+    if (!docEditor) return;
+    fn(docEditor);
+  }
+  if (fmtBold) fmtBold.addEventListener("click", () => withEditor((ed) => ed.chain().toggleBold().run()));
+  if (fmtItalic) fmtItalic.addEventListener("click", () => withEditor((ed) => ed.chain().toggleItalic().run()));
+  if (fmtUnderline) fmtUnderline.addEventListener("click", () => withEditor((ed) => ed.chain().toggleUnderline().run()));
+  if (fmtSize) fmtSize.addEventListener("change", () => {
+    withEditor((ed) => {
+      if (fmtSize.value) ed.chain().setFontSize(fmtSize.value).run();
+      else ed.chain().unsetFontSize().run();
+    });
+  });
+  if (fmtFont) fmtFont.addEventListener("change", () => {
+    withEditor((ed) => ed.chain().setFontFamily(fmtFont.value).run());
+  });
+  if (fmtColor) fmtColor.addEventListener("input", () => {
+    withEditor((ed) => ed.chain().setColor(fmtColor.value).run());
+  });
+
+  if (editorExpandBtn) {
+    editorExpandBtn.addEventListener("click", async () => {
+      await ensureEditor();
+      fsMode = "editor";
+      fsBody.innerHTML = "";
+      const host = document.createElement("div");
+      host.style.minHeight = "70vh";
+      host.style.background = "#f7f7fb";
+      host.style.padding = "12px";
+      host.style.borderRadius = "10px";
+      fsBody.appendChild(host);
+      while (editorCanvas.firstChild) host.appendChild(editorCanvas.firstChild);
+      if (fsTitle) fsTitle.textContent = "Document editor";
+      fsOverlay.classList.add("open");
+      document.body.style.overflow = "hidden";
+      editorExpandBtn.setAttribute("aria-expanded", "true");
+      fsCloseBtn.focus();
+    });
+  }
+
+  // Recolor selected chart via /api/render-chart
+  if (imgRecolor) {
+    imgRecolor.addEventListener("change", async () => {
+      if (!docEditor || !API) return;
+      const sel = docEditor.editor && docEditor.editor.state.selection;
+      if (!(sel && sel.node && sel.node.type.name === "docImage")) return;
+      const spec = sel.node.attrs.chartSpec;
+      if (!spec || typeof spec !== "object") {
+        setStatus("", "Recolor works on charts created here — upload images keep their pixels.");
+        return;
+      }
+      const colors = [imgRecolor.value].concat((sel.node.attrs.colors || chartColors || []).slice(1));
+      const body = Object.assign({}, spec, { colors });
+      try {
+        setStatus("busy", "Updating chart colors…");
+        const r = await fetch(API + "/api/render-chart", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        if (!r.ok) throw new Error("Chart re-render failed");
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        // convert to data URL for export persistence
+        const dataUrl = await new Promise((resolve) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(fr.result);
+          fr.readAsDataURL(blob);
+        });
+        URL.revokeObjectURL(url);
+        docEditor.setImageAttrs({ src: dataUrl, colors, chartSpec: body });
+        setStatus("ok", "Chart colors updated.");
+      } catch (e) {
+        setStatus("err", e.message || String(e));
+      }
+    });
+  }
+
+  // Wallet connect / top-up (device-local)
+  async function refreshPayConfig() {
+    if (!API) return;
+    try {
+      const r = await fetch(API + "/api/pay/config");
+      payConfig = await r.json();
+      const st = await fetch(API + "/api/pay/status?device_id=" + encodeURIComponent(deviceId));
+      const status = await st.json();
+      const saved = JSON.parse(localStorage.getItem(WALLET_KEY) || "null");
+      if (saved && saved.address) {
+        walletConnectBtn.textContent = saved.address.slice(0, 6) + "…" + saved.address.slice(-4);
+        walletTopupBtn.hidden = false;
+      }
+      walletStatus.textContent =
+        "Credits: " + (status.credits || 0) +
+        (status.free_left != null ? (" · free today: " + status.free_left) : "") +
+        " · device-local wallet login";
+    } catch (_) {}
+  }
+  refreshPayConfig();
+
+  walletConnectBtn.addEventListener("click", async () => {
+    if (!window.ethereum) {
+      setStatus("err", "No wallet found — install MetaMask (or similar).");
+      return;
+    }
+    try {
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      const address = accounts && accounts[0];
+      if (!address) throw new Error("No account");
+      localStorage.setItem(WALLET_KEY, JSON.stringify({ address, ts: Date.now() }));
+      walletConnectBtn.textContent = address.slice(0, 6) + "…" + address.slice(-4);
+      walletTopupBtn.hidden = false;
+      setStatus("ok", "Wallet connected on this device. Top up once to approve spend credits.");
+      refreshPayConfig();
+    } catch (e) {
+      setStatus("err", e.message || "Wallet connect cancelled");
+    }
+  });
+
+  walletTopupBtn.addEventListener("click", async () => {
+    const saved = JSON.parse(localStorage.getItem(WALLET_KEY) || "null");
+    if (!saved || !saved.address) {
+      setStatus("err", "Connect a wallet first.");
+      return;
+    }
+    if (!payConfig) await refreshPayConfig();
+    const currency = payCurrency.value;
+    if (currency === "LCAI") {
+      setStatus("err", "LCAI top-up wiring needs LCAI_RECEIVE_WALLET on the server — use KEIKO for now, or set env.");
+      return;
+    }
+    if (!payConfig || !payConfig.keiko_enabled || !payConfig.keiko_receive) {
+      setStatus("err", "KEIKO payments are not configured on the server yet.");
+      return;
+    }
+    if (!window.KeikoPay) {
+      setStatus("err", "Pay helper not loaded.");
+      return;
+    }
+    setStatus("busy", "Approve spend in your wallet (once)…");
+    const res = await window.KeikoPay.pay({
+      to: payConfig.keiko_receive,
+      amount: payConfig.price_keiko,
+      verifyUrl: null
+    });
+    if (!res.ok) {
+      setStatus("err", res.error || "Payment cancelled");
+      return;
+    }
+    try {
+      const vr = await fetch(API + "/api/pay/verify-keiko", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Device-Id": deviceId },
+        body: JSON.stringify({
+          device_id: deviceId,
+          txHash: res.txHash,
+          walletAddress: res.from || saved.address
+        })
+      });
+      const out = await vr.json().catch(() => ({}));
+      if (!vr.ok) throw new Error(out.error || "Verify failed");
+      setStatus("ok", "paid ✓ · " + (out.added || "") + " credits added. Later jobs auto-deduct — no popup.");
+      refreshPayConfig();
+    } catch (e) {
+      setStatus("err", e.message || String(e));
+    }
+  });
 
   async function extractChartPngsFromDocx(url) {
     chartPngDataUrls = [];
@@ -1562,12 +1893,23 @@
       fd.append("forum_wrap", forumWrap.checked ? "1" : "0");
       fd.append("want_chart", wantChart.checked ? "1" : "0");
       fd.append("chart_type", chartType.value || "auto");
+      fd.append("chart_colors", JSON.stringify(chartColors || []));
+      fd.append("device_id", deviceId);
       imageFiles.slice(0, 5).forEach((f) => fd.append("images", f, f.name || "note.jpg"));
-      const r = await fetch(API + "/api/jobs", { method: "POST", body: fd });
+      const r = await fetch(API + "/api/jobs", {
+        method: "POST",
+        body: fd,
+        headers: { "X-Device-Id": deviceId }
+      });
       const data = await r.json().catch(() => ({}));
+      if (r.status === 402 || data.need_pay) {
+        throw new Error(data.error || "Payment needed — connect wallet and top up credits.");
+      }
       if (!r.ok) throw new Error(data.error || "Could not start job");
-      setStatus("busy", "Job started — AIVM may take 1–2 minutes…");
+      const payNote = data.pay && data.pay.paid ? "paid ✓ · generating…" : "generating…";
+      setStatus("busy", payNote + " AIVM may take 1–2 minutes.");
       startPolling(data.job_id);
+      refreshPayConfig();
     } catch (e) {
       setStatus("err", e.message || String(e));
       setBusy(false);

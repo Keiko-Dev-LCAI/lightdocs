@@ -402,14 +402,19 @@
       </header>
     </div>
 
+    <div class="privacy" id="payDisclaimer" role="note">
+      Beta disclaimer: Lightdocs is provided as-is. AI output is not professional advice. No refunds.
+      Pricing and terms may change to regular pricing after testing. Service may change or end.
+      Wallet connection stays on this device — we don’t keep your address after the job.
+    </div>
     <div class="wallet-bar" id="walletBar">
       <button type="button" class="btn btn-ghost btn-sm" id="walletConnectBtn">Connect wallet</button>
-      <button type="button" class="btn btn-ghost btn-sm" id="walletTopupBtn" hidden>Top up credits</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="walletTopupBtn" hidden>Subscribe $1/mo</button>
       <select id="payCurrency" aria-label="Pay currency" style="width:auto;min-width:110px">
-        <option value="KEIKO">KEIKO</option>
-        <option value="LCAI">LCAI</option>
+        <option value="KEIKO">KEIKO (−20%)</option>
+        <option value="LCAI">LCAI ($1)</option>
       </select>
-      <span class="hint" id="walletStatus">Wallet login is device-local — we don’t keep your address.</span>
+      <span class="hint" id="walletStatus">Connect wallet for 100 free beta docs, then $1/mo (KEIKO −20%).</span>
     </div>
 
     <div class="workspace">
@@ -1090,22 +1095,48 @@
   }
 
   // Wallet connect / top-up (device-local)
+  function connectedWallet() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(WALLET_KEY) || "null");
+      return (saved && saved.address) || "";
+    } catch (_) {
+      return "";
+    }
+  }
+
   async function refreshPayConfig() {
     if (!API) return;
     try {
       const r = await fetch(API + "/api/pay/config");
       payConfig = await r.json();
-      const st = await fetch(API + "/api/pay/status?device_id=" + encodeURIComponent(deviceId));
-      const status = await st.json();
-      const saved = JSON.parse(localStorage.getItem(WALLET_KEY) || "null");
-      if (saved && saved.address) {
-        walletConnectBtn.textContent = saved.address.slice(0, 6) + "…" + saved.address.slice(-4);
-        walletTopupBtn.hidden = false;
+      if (payConfig && payConfig.disclaimer) {
+        const el = document.getElementById("payDisclaimer");
+        if (el) el.textContent = payConfig.disclaimer;
       }
-      walletStatus.textContent =
-        "Credits: " + (status.credits || 0) +
-        (status.free_left != null ? (" · free today: " + status.free_left) : "") +
-        " · device-local wallet login";
+      const addr = connectedWallet();
+      if (addr) {
+        walletConnectBtn.textContent = addr.slice(0, 6) + "…" + addr.slice(-4);
+        walletTopupBtn.hidden = false;
+        const st = await fetch(API + "/api/pay/status?wallet=" + encodeURIComponent(addr));
+        const status = await st.json();
+        if (status.pass_active) {
+          const until = status.pass_expires
+            ? new Date(status.pass_expires * 1000).toLocaleDateString()
+            : "";
+          walletStatus.textContent = "Pass active until " + until + " · unlimited generate · device-local login";
+          walletTopupBtn.textContent = "Renew pass";
+        } else {
+          walletStatus.textContent =
+            "Free beta docs left: " + (status.free_left != null ? status.free_left : "?") +
+            " / " + (status.free_docs_total || 100) +
+            " · then $1/mo (KEIKO −20%)";
+          walletTopupBtn.textContent = "Subscribe $1/mo";
+        }
+      } else {
+        walletStatus.textContent =
+          "Connect wallet for " + ((payConfig && payConfig.free_docs_total) || 100) +
+          " free beta docs, then $1/mo (KEIKO −20%).";
+      }
     } catch (_) {}
   }
   refreshPayConfig();
@@ -1122,12 +1153,17 @@
       localStorage.setItem(WALLET_KEY, JSON.stringify({ address, ts: Date.now() }));
       walletConnectBtn.textContent = address.slice(0, 6) + "…" + address.slice(-4);
       walletTopupBtn.hidden = false;
-      setStatus("ok", "Wallet connected on this device. Top up once to approve spend credits.");
+      setStatus("ok", "Wallet connected on this device. Free beta docs are counted per wallet.");
       refreshPayConfig();
     } catch (e) {
       setStatus("err", e.message || "Wallet connect cancelled");
     }
   });
+
+  // Auto-reconnect display if already connected this device
+  if (connectedWallet()) {
+    walletTopupBtn.hidden = false;
+  }
 
   walletTopupBtn.addEventListener("click", async () => {
     const saved = JSON.parse(localStorage.getItem(WALLET_KEY) || "null");
@@ -1138,7 +1174,7 @@
     if (!payConfig) await refreshPayConfig();
     const currency = payCurrency.value;
     if (currency === "LCAI") {
-      setStatus("err", "LCAI top-up wiring needs LCAI_RECEIVE_WALLET on the server — use KEIKO for now, or set env.");
+      setStatus("err", "LCAI subscribe needs LCAI_RECEIVE_WALLET on the server — use KEIKO (−20%) for now.");
       return;
     }
     if (!payConfig || !payConfig.keiko_enabled || !payConfig.keiko_receive) {
@@ -1149,10 +1185,15 @@
       setStatus("err", "Pay helper not loaded.");
       return;
     }
-    setStatus("busy", "Approve spend in your wallet (once)…");
+    const amount = payConfig.keiko_amount;
+    if (!amount || amount <= 0) {
+      setStatus("err", "Could not price KEIKO — try again in a moment.");
+      return;
+    }
+    setStatus("busy", "Approve $1/mo pass in your wallet (KEIKO −20%)…");
     const res = await window.KeikoPay.pay({
       to: payConfig.keiko_receive,
-      amount: payConfig.price_keiko,
+      amount: amount,
       verifyUrl: null
     });
     if (!res.ok) {
@@ -1162,16 +1203,15 @@
     try {
       const vr = await fetch(API + "/api/pay/verify-keiko", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Device-Id": deviceId },
+        headers: { "Content-Type": "application/json", "X-Wallet": saved.address },
         body: JSON.stringify({
-          device_id: deviceId,
           txHash: res.txHash,
           walletAddress: res.from || saved.address
         })
       });
       const out = await vr.json().catch(() => ({}));
       if (!vr.ok) throw new Error(out.error || "Verify failed");
-      setStatus("ok", "paid ✓ · " + (out.added || "") + " credits added. Later jobs auto-deduct — no popup.");
+      setStatus("ok", "paid ✓ · 30-day pass active. Generate freely — no popup per job.");
       refreshPayConfig();
     } catch (e) {
       setStatus("err", e.message || String(e));
@@ -1895,18 +1935,24 @@
       fd.append("chart_type", chartType.value || "auto");
       fd.append("chart_colors", JSON.stringify(chartColors || []));
       fd.append("device_id", deviceId);
+      const waddr = connectedWallet();
+      if (waddr) fd.append("wallet", waddr);
       imageFiles.slice(0, 5).forEach((f) => fd.append("images", f, f.name || "note.jpg"));
+      const headers = { "X-Device-Id": deviceId };
+      if (waddr) headers["X-Wallet"] = waddr;
       const r = await fetch(API + "/api/jobs", {
         method: "POST",
         body: fd,
-        headers: { "X-Device-Id": deviceId }
+        headers: headers
       });
       const data = await r.json().catch(() => ({}));
-      if (r.status === 402 || data.need_pay) {
-        throw new Error(data.error || "Payment needed — connect wallet and top up credits.");
+      if (r.status === 402 || data.need_pay || data.need_wallet) {
+        throw new Error(data.error || "Subscribe or renew to keep going — connect wallet / $1 mo pass.");
       }
       if (!r.ok) throw new Error(data.error || "Could not start job");
-      const payNote = data.pay && data.pay.paid ? "paid ✓ · generating…" : "generating…";
+      const payNote = (data.pay && data.pay.paid)
+        ? "paid ✓ · generating…"
+        : "generating…";
       setStatus("busy", payNote + " AIVM may take 1–2 minutes.");
       startPolling(data.job_id);
       refreshPayConfig();

@@ -1,6 +1,6 @@
 /**
  * Lightdocs document editor — lazy-loaded Tiptap canvas.
- * Charts/images are positioned here; chart pixels come from the server PNG pipeline.
+ * Images are positioned/resized here; export rebuilds the doc from editor blocks.
  */
 const ESM = (pkg) => `https://esm.sh/${pkg}`;
 
@@ -94,8 +94,6 @@ function createDocImage({ Node, mergeAttributes }) {
         alt: { default: "image" },
         width: { default: 320 },
         wrap: { default: "full" },
-        colors: { default: null },
-        chartSpec: { default: null },
       };
     },
     parseHTML() {
@@ -259,8 +257,6 @@ export async function createLightdocsEditor(opts) {
             width: sel.node.attrs.width,
             wrap: sel.node.attrs.wrap,
             alt: sel.node.attrs.alt,
-            colors: sel.node.attrs.colors,
-            chartSpec: sel.node.attrs.chartSpec,
             pos: sel.from,
           });
       } else {
@@ -313,8 +309,6 @@ export async function createLightdocsEditor(opts) {
           alt: node.attrs.alt || "image",
           width_in: Math.max(0.8, Math.min(wpx / 96, 6.5)),
           wrap: node.attrs.wrap || "full",
-          colors: node.attrs.colors || null,
-          chartSpec: node.attrs.chartSpec || null,
         });
       } else if (node.type.name === "paragraph") {
         blocks.push({
@@ -346,8 +340,6 @@ export async function createLightdocsEditor(opts) {
           alt: attrs.alt || "image",
           width: attrs.width || 320,
           wrap: attrs.wrap || "full",
-          colors: attrs.colors || null,
-          chartSpec: attrs.chartSpec || null,
         },
       })
       .run();

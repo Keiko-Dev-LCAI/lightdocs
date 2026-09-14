@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.7.2"
+VERSION = "0.7.3"
 
 VALID_MODES = frozenset(
     {
@@ -288,6 +288,14 @@ _LEAK_LINE_RES = [
         r"^if input has no clear",
         r"^pick the best of bar",
         r"^proposal type hint",
+        r"^welcome to\b",
+        r"^i'?m excited to help",
+        r"^i am excited to help",
+        r"^let'?s (break it down|dive in|get started)",
+        r"^here are the main points\s*:?\s*$",
+        r"^what can you do with this information\??\s*$",
+        r"^as a developer, you can\b",
+        r"^today,? we'?re going to\b",
     )
 ]
 
@@ -594,6 +602,11 @@ def build_prompt(
         "Use the EXACT names, product/project names, identifiers, and addresses that appear in "
         "the INPUT, verbatim — never rename, abbreviate, translate, or invent a name for anything "
         "(for example, never change 'OrcaVault' into 'OrcaApp'). "
+        "You are a document formatter, NOT a chat assistant: never greet the reader, never "
+        "introduce yourself, never use a name for yourself (you are not 'OrcaApp' or any "
+        "assistant), and never write conversational filler such as 'Welcome to...', "
+        "'I'm excited to help', 'Let's break it down', or 'What can you do with this information'. "
+        "Output ONLY the finished document. "
         "No preamble, no apologies, no 'here is the output', no token stats. "
     )
     if lightchain_ok:

@@ -203,12 +203,16 @@
   .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
   #docList { font-size: 14px; color: var(--text); font-weight: 600; line-height: 1.35; word-break: break-word; }
   #docList:not(:empty) { display: inline-block; margin-top: 10px; padding: 8px 12px; border: 1px solid var(--green); border-radius: 8px; background: rgba(76,175,125,0.14); }
-  .followup { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .followup {
+    margin-top: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+    background: rgba(91,75,255,0.10); border: 1px solid var(--purple); border-radius: 12px;
+  }
+  .followup-title { font-size: 13px; font-weight: 700; color: var(--text); letter-spacing: 0.02em; }
   .follow-chips { display: flex; gap: 8px; flex-wrap: wrap; }
   .follow-ask { display: flex; gap: 8px; }
   .follow-ask input {
-    flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px;
-    border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 14px;
+    flex: 1; min-width: 0; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--purple); background: var(--bg); color: var(--text); font-size: 14px;
   }
   .status {
     font-size: 13px; font-weight: 600; color: var(--text2); padding: 8px 10px; border-radius: 10px;
@@ -394,7 +398,7 @@
   .obj-align { display: inline-flex; gap: 4px; flex-wrap: wrap; }
   .obj-align .btn.is-active { border-color: var(--purple); background: #eef0ff; color: #14152C; }
   #editorHint { flex-shrink: 0; }
-  #jobHint { flex-shrink: 0; }
+  #jobHint { display: none; }
   @media (max-width: 719px) {
     .doc-image-handles { display: none !important; }
   }
@@ -725,6 +729,7 @@
             <button class="btn btn-ghost" id="sendBtn" type="button" disabled title="Send / share — file stays on your device">Send</button>
           </div>
           <div class="followup hidden" id="followBar">
+            <p class="followup-title">Ask about this or change it</p>
             <div class="follow-chips">
               <button type="button" class="btn btn-ghost btn-sm" id="followSimpler">Explain simpler</button>
               <button type="button" class="btn btn-ghost btn-sm" id="followShorter">Shorter</button>
@@ -2055,9 +2060,7 @@
       docEditor = null;
     }
     setStatus("ok", data.step || "Done — download ready.");
-    jobHint.textContent = data.job_id
-      ? ("Job " + data.job_id.slice(0, 8) + "… · drafts stay on this device only")
-      : "";
+    jobHint.textContent = "";
     syncEditorHints();
     localStorage.removeItem(JOB_KEY);
     setViewMode("preview");
@@ -2068,7 +2071,6 @@
   }
   function startPolling(jobId) {
     localStorage.setItem(JOB_KEY, jobId);
-    jobHint.textContent = "Job " + jobId.slice(0, 8) + "… — safe to background this tab.";
     syncEditorHints();
     clearPoll();
     pollTimer = setInterval(async () => {

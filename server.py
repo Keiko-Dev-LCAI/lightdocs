@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 
 VALID_MODES = frozenset(
     {
@@ -536,17 +536,6 @@ def build_prompt(
     if mode == "dao":
         ptype = str(extras.get("prop_type") or "general")
         extra_bits.append(f"Proposal type hint: {ptype}.")
-        if extras.get("forum_wrap"):
-            extra_bits.append(
-                "AFTER the seven proposal sections, also append a Forum/Discord "
-                "announcement wrapper of the same content with emoji section headers "
-                "and a Review-and-vote CTA + [TO FILL] link (default wrapper is OFF "
-                "unless requested — it is requested now)."
-            )
-        else:
-            extra_bits.append(
-                "Do NOT wrap as a forum announcement; emit the proposal body only."
-            )
 
     fmt = _format_instructions(output, mode)
     extra = ("\n".join(extra_bits) + "\n") if extra_bits else ""
@@ -814,7 +803,6 @@ def create_job():
     output = "docx"
     mode = "notes-word"
     prop_type = "general"
-    forum_wrap = False
     device_id = (request.headers.get("X-Device-Id") or "").strip()
     wallet = (request.headers.get("X-Wallet") or "").strip().lower()
     images: list[bytes] = []
@@ -825,7 +813,6 @@ def create_job():
         output = (request.form.get("output") or request.form.get("outfmt") or "docx").strip()
         mode = (request.form.get("mode") or "notes-word").strip()
         prop_type = (request.form.get("prop_type") or request.form.get("propType") or "general").strip()
-        forum_wrap = _truthy(request.form.get("forum_wrap") or request.form.get("forumWrap"))
         device_id = (request.form.get("device_id") or device_id).strip()
         wallet = (request.form.get("wallet") or request.form.get("walletAddress") or wallet).strip().lower()
         for key in ("images", "image", "files"):
@@ -841,7 +828,6 @@ def create_job():
         output = (body.get("output") or body.get("outfmt") or "docx").strip()
         mode = (body.get("mode") or "notes-word").strip()
         prop_type = str(body.get("prop_type") or body.get("propType") or "general").strip()
-        forum_wrap = _truthy(body.get("forum_wrap") or body.get("forumWrap"))
         device_id = str(body.get("device_id") or device_id).strip()
         wallet = str(body.get("wallet") or body.get("walletAddress") or wallet).strip().lower()
         for b64 in body.get("images") or []:
@@ -872,7 +858,6 @@ def create_job():
 
     extras = {
         "prop_type": prop_type,
-        "forum_wrap": forum_wrap,
     }
     job_id = uuid.uuid4().hex
     job = {

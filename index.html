@@ -542,10 +542,6 @@
               <option value="signal">Signaling / temperature check</option>
               <option value="grant">Grant</option>
             </select>
-            <label class="check-row" for="forumWrap">
-              <input type="checkbox" id="forumWrap">
-              <span>Also wrap as Forum/Discord announcement (emoji sections). Default off.</span>
-            </label>
           </div>
           <p class="hint" id="modeHint">Phone photo or paste handwritten notes → clean Word-style notes.</p>
           <p class="hint" id="outHint">Pick Word, Markdown, Excel, or PowerPoint — Generate builds a real downloadable file.</p>
@@ -801,7 +797,6 @@
   const saveDraftBtn = document.getElementById("saveDraftBtn");
   const refreshDraftsBtn = document.getElementById("refreshDraftsBtn");
   const propType = document.getElementById("propType");
-  const forumWrap = document.getElementById("forumWrap");
 
   // Terms modal (OrcaFiles-style)
   const termsModal = document.getElementById("modal-terms");
@@ -1519,7 +1514,6 @@
       style: styleEl.value,
       output: outfmt.value,
       propType: propType.value,
-      forumWrap: !!forumWrap.checked,
       resultText: lastText || "",
       updatedAt: Date.now(),
       images: images,
@@ -1605,7 +1599,6 @@
     if (d.style) styleEl.value = d.style;
     if (d.output) outfmt.value = d.output;
     if (d.propType) propType.value = d.propType;
-    forumWrap.checked = !!d.forumWrap;
     document.body.classList.toggle("mode-dao", modeEl.value === "dao");
     modeHint.textContent = MODE_HINTS[modeEl.value] || "";
     outHint.textContent = OUT_HINTS[outfmt.value] || "";
@@ -1651,7 +1644,6 @@
   styleEl.addEventListener("change", queueAutosave);
   outfmt.addEventListener("change", queueAutosave);
   propType.addEventListener("change", queueAutosave);
-  forumWrap.addEventListener("change", queueAutosave);
 
   images.addEventListener("change", () => {
     imageFiles = Array.from(images.files || []);
@@ -1842,7 +1834,6 @@
         if (auto.style) styleEl.value = auto.style;
         if (auto.output) outfmt.value = auto.output;
         if (auto.propType) propType.value = auto.propType;
-        forumWrap.checked = !!auto.forumWrap;
         applyModeDefaults();
       }
     } catch (_) {}
@@ -1888,7 +1879,6 @@
       fd.append("output", outfmt.value);
       fd.append("text", text);
       fd.append("prop_type", propType.value);
-      fd.append("forum_wrap", forumWrap.checked ? "1" : "0");
       fd.append("device_id", deviceId);
       const waddr = connectedWallet();
       if (waddr) fd.append("wallet", waddr);

@@ -31,12 +31,12 @@
     line-height: 1.45;
   }
   body {
-    padding: 12px clamp(16px, 3vw, 36px);
+    padding: 12px 24px;
     padding-bottom: max(16px, env(safe-area-inset-bottom));
   }
   .shell {
-    width: 100%;
-    max-width: 1360px;
+    width: min(1700px, 96vw);
+    max-width: min(1700px, 96vw);
     margin: 0 auto;
     display: flex;
     flex-direction: column;
@@ -68,25 +68,38 @@
   .workspace { display: grid; grid-template-columns: 1fr; gap: 12px; }
   @media (min-width: 960px) {
     .workspace {
-      grid-template-columns: minmax(240px, 280px) minmax(0, 1.15fr) minmax(0, 1.15fr);
+      grid-template-columns: minmax(260px, 300px) minmax(0, 1.15fr) minmax(0, 1.15fr);
       gap: 14px;
-      align-items: start;
+      align-items: stretch;
+      /* Fill viewport height without pushing Generate below the fold */
+      height: calc(100vh - 128px);
+      max-height: calc(100vh - 128px);
+      min-height: 420px;
     }
   }
   @media (min-width: 1200px) {
-    .workspace { grid-template-columns: minmax(260px, 300px) minmax(0, 1.2fr) minmax(0, 1.2fr); gap: 16px; }
+    .workspace { grid-template-columns: minmax(280px, 320px) minmax(0, 1.2fr) minmax(0, 1.2fr); gap: 16px; }
   }
-  .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .col {
+    display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0;
+    height: 100%;
+  }
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px;
   }
-  .card.grow { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .card.grow {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+  }
   label.field { display: block; font-size: 12px; font-weight: 700; color: var(--text2); margin-bottom: 4px; }
   select, textarea, input[type="text"] {
     width: 100%; background: #12132a; border: 1px solid var(--border); border-radius: 10px;
     color: var(--text); font: inherit; padding: 10px 12px; min-height: 42px; line-height: 1.4;
   }
-  textarea { min-height: 96px; max-height: 28vh; resize: vertical; }
+  textarea { flex: 1 1 auto; min-height: 88px; resize: vertical; }
   .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row-3 { display: grid; grid-template-columns: 1fr; gap: 10px; }
   @media (min-width: 720px) {
@@ -168,17 +181,19 @@
   }
   .toggle-group button.active { background: rgba(91,75,255,0.28); color: #fff; }
   .result {
-    flex: 1; white-space: pre-wrap; word-break: break-word; font-size: 14px; color: var(--text);
+    flex: 1 1 auto; white-space: pre-wrap; word-break: break-word; font-size: 14px; color: var(--text);
     background: #12132a; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
-    overflow: auto; max-height: min(36vh, 360px); min-height: 100px; line-height: 1.45;
+    overflow: auto; min-height: 120px; line-height: 1.45;
   }
   .preview-pane {
-    flex: 1; background: #f4f4f8; color: #14152C; border: 1px solid var(--border);
-    border-radius: 10px; padding: 10px 12px; overflow: auto; max-height: min(36vh, 360px); min-height: 100px;
+    flex: 1 1 auto; background: #f4f4f8; color: #14152C; border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; overflow: auto; min-height: 120px;
     font-size: 14px; line-height: 1.45;
   }
   .preview-pane.hidden, .result.hidden, .editor-shell.hidden { display: none; }
-  .preview-wrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .preview-wrap {
+    position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;
+  }
   .preview-expand-btn {
     position: absolute; top: 8px; right: 8px; z-index: 2;
     min-height: 40px; min-width: 40px; padding: 8px 12px; border-radius: 10px;
@@ -201,14 +216,14 @@
     border-radius: 12px; padding: 16px 18px; border: 1px solid var(--border);
   }
   .editor-shell {
-    flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 100px;
+    flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; min-height: 120px;
   }
   .editor-toolbar {
-    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex-shrink: 0;
   }
   .editor-toolbar .btn-sm { min-height: 36px; }
   .editor-canvas {
-    flex: 1; min-height: 100px; max-height: min(36vh, 360px); overflow: auto;
+    flex: 1 1 auto; min-height: 120px; overflow: auto;
     background: #f7f7fb; color: #14152C; border: 1px solid var(--border);
     border-radius: 10px; padding: 10px 12px;
   }
@@ -268,7 +283,7 @@
   .preview-fallback { color: #5a5c7a; font-style: italic; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .actions .btn { flex: 1; min-width: 110px; }
-  .draft-list { display: flex; flex-direction: column; gap: 8px; max-height: min(40vh, 320px); overflow: auto; }
+  .draft-list { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; overflow: auto; }
   .draft-item {
     border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: #12132a;
   }
@@ -277,21 +292,23 @@
   .draft-actions { display: flex; flex-wrap: wrap; gap: 6px; }
   footer { font-size: 11px; color: var(--muted); text-align: center; padding: 6px 0 2px; line-height: 1.4; }
   code { font-size: 12px; color: #CCCEEF; }
-  .generate-wrap { margin-top: 2px; }
-  /* Desktop: keep Generate in the input column without forcing tall panels */
+  .generate-wrap { margin-top: auto; flex-shrink: 0; }
+  /* Desktop: equal-height columns fill the workspace; Generate stays at bottom of middle col */
   @media (min-width: 960px) {
-    .workspace { max-height: calc(100vh - 120px); }
-    .col { max-height: 100%; overflow: auto; }
+    .col { overflow: hidden; }
+    .result-toolbar, .status, .actions, .hint { flex-shrink: 0; }
   }
-  /* Phone: compact stack + sticky Generate */
+  /* Phone: single-column stack + sticky Generate */
   @media (max-width: 719px) {
     body { padding: 10px 12px; padding-bottom: max(72px, env(safe-area-inset-bottom)); }
-    .shell { gap: 10px; }
+    .shell { width: 100%; max-width: 100%; gap: 10px; }
     .card { padding: 12px; }
-    .workspace { gap: 10px; }
-    .col { gap: 10px; }
-    textarea { min-height: 88px; max-height: 22vh; }
-    .result, .preview-pane, .editor-canvas { min-height: 100px; max-height: 34vh; padding: 10px; }
+    .workspace { gap: 10px; height: auto; max-height: none; min-height: 0; }
+    .col { height: auto; gap: 10px; overflow: visible; }
+    textarea { min-height: 88px; max-height: 22vh; flex: none; }
+    .draft-list { flex: none; max-height: min(36vh, 280px); }
+    .result, .preview-pane, .editor-canvas { min-height: 100px; max-height: 34vh; padding: 10px; flex: none; }
+    .preview-wrap, .editor-shell, .card.grow { flex: none; }
     .generate-wrap {
       position: sticky;
       bottom: 0;

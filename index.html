@@ -754,7 +754,7 @@
       </div>
       <div class="modal-body" style="gap:8px;">
         <p style="font-size:12px;color:#8a8cb0;margin:0 0 6px;">
-          Pick where to send it. Your file is saved to this device first, then the app opens so you can attach it. Nothing is uploaded to LightDocs.
+          Your browser doesn't hand websites the system share sheet, so here are the common options. Your file is saved to this device first, then the app opens so you can attach it. Nothing is uploaded to LightDocs.
         </p>
         <button type="button" class="btn btn-ghost" data-share="email">✉️ Email</button>
         <button type="button" class="btn btn-ghost" data-share="text">💬 Text message</button>
@@ -2114,15 +2114,30 @@
     };
   }
 
-  function canNativeShareFile(file) {
+  /** Prefer the real OS share sheet; return true if used (or user cancelled it). */
+  async function tryNativeShare(out) {
+    if (!navigator.share) return false;
     try {
-      if (!navigator.share) return false;
-      if (typeof navigator.canShare === "function") {
-        return navigator.canShare({ files: [file] });
+      if (typeof navigator.canShare === "function" && navigator.canShare({ files: [out.file] })) {
+        await navigator.share({
+          files: [out.file],
+          title: out.name,
+          text: "Shared from LightDocs"
+        });
+        return true;
       }
-      // Older Safari may share without canShare — try files only if supported
-      return false;
-    } catch (_) {
+    } catch (e) {
+      if (e && e.name === "AbortError") return true;
+    }
+    try {
+      triggerBlobDownload(out.blob, out.name);
+      await navigator.share({
+        title: out.name,
+        text: "Document made in LightDocs — the file was saved to your device to attach."
+      });
+      return true;
+    } catch (e) {
+      if (e && e.name === "AbortError") return true;
       return false;
     }
   }
@@ -2162,12 +2177,8 @@
     try {
       setStatus("busy", "Preparing file to send…");
       const out = await getCurrentExportFile();
-      if (canNativeShareFile(out.file)) {
-        await navigator.share({
-          files: [out.file],
-          title: out.name,
-          text: "Shared from LightDocs"
-        });
+      const shared = await tryNativeShare(out);
+      if (shared) {
         setStatus("ok", "Shared — your file stayed on this device (not uploaded to LightDocs).");
         return;
       }
@@ -2201,7 +2212,7 @@
           case "email":
             triggerBlobDownload(out.blob, out.name);
             window.open(`mailto:?subject=${subj}&body=${body}`, "_blank", "noopener,noreferrer");
-            setStatus("ok", "Saved — attach it in your email. Nothing uploaded to LightDocs.");
+            setStatus("ok", "Saved — attach it in your email.");
             break;
           case "text":
             triggerBlobDownload(out.blob, out.name);
@@ -2210,7 +2221,7 @@
             break;
           case "wechat":
             triggerBlobDownload(out.blob, out.name);
-            setStatus("ok", "Saved — open WeChat and attach the file. Nothing uploaded to LightDocs.");
+            setStatus("ok", "Saved — open WeChat and attach the file.");
             break;
           case "orcamail":
             triggerBlobDownload(out.blob, out.name);

@@ -1791,6 +1791,7 @@
     setBusy(false);
     copyBtn.disabled = !lastText;
     downloadBtn.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
     setStatus("ok", "Draft opened (this device only). Generate again for a fresh file.");
     if (lastText) {
       setViewMode("preview");

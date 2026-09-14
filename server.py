@@ -102,6 +102,13 @@ def _load_job(job_id: str) -> Optional[dict[str, Any]]:
         return None
 
 
+def _unlink_quiet(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _cleanup_expired() -> None:
     now = time.time()
     with _jobs_lock:
@@ -114,20 +121,14 @@ def _cleanup_expired() -> None:
             for key in ("docx_path", "file_path"):
                 path = _jobs[jid].get(key)
                 if path and Path(path).is_file():
-                    try:
-                        Path(path).unlink()
-                    except OSError:
-                        pass
-            # chart pngs
+                    _unlink_quiet(Path(path))
+            # job-attached chart pngs (process_job)
             for png in DATA_DIR.glob(f"{jid}-chart-*.png"):
-                try:
-                    png.unlink()
-                except OSError:
-                    pass
-            try:
-                _job_meta_path(jid).unlink(missing_ok=True)
-            except OSError:
-                pass
+                _unlink_quiet(png)
+            # editor chart-render pngs registered under this job id
+            for png in DATA_DIR.glob(f"chart-render-{jid}*.png"):
+                _unlink_quiet(png)
+            _unlink_quiet(_job_meta_path(jid))
             _jobs.pop(jid, None)
     for p in _META_DIR.glob("*.json"):
         try:
@@ -136,12 +137,21 @@ def _cleanup_expired() -> None:
                 for key in ("docx_path", "file_path"):
                     doc = job.get(key)
                     if doc and Path(doc).is_file():
-                        Path(doc).unlink(missing_ok=True)
+                        _unlink_quiet(Path(doc))
                 jid = job.get("id") or p.stem
                 for png in DATA_DIR.glob(f"{jid}-chart-*.png"):
-                    png.unlink(missing_ok=True)
-                p.unlink(missing_ok=True)
+                    _unlink_quiet(png)
+                for png in DATA_DIR.glob(f"chart-render-{jid}*.png"):
+                    _unlink_quiet(png)
+                _unlink_quiet(p)
         except Exception:
+            pass
+    # Safety net: orphan editor chart PNGs (and any stray chart-render files) by mtime
+    for png in DATA_DIR.glob("chart-render-*.png"):
+        try:
+            if now - png.stat().st_mtime > JOB_TTL_SECONDS:
+                _unlink_quiet(png)
+        except OSError:
             pass
 
 
@@ -1089,19 +1099,37 @@ def build_docx_from_blocks(blocks: list[Any], path: Path) -> None:
 @app.post("/api/render-chart")
 def render_chart_api():
     """Render a chart spec to PNG (matplotlib). Editor positions it; does not draw charts."""
+    _cleanup_expired()
     body = request.get_json(silent=True) or {}
     spec = body.get("chart") if isinstance(body.get("chart"), dict) else body
     if not isinstance(spec, dict):
         return jsonify({"error": "Provide a chart spec object"}), 400
-    job_id = uuid.uuid4().hex[:12]
+    job_id = uuid.uuid4().hex
     out = DATA_DIR / f"chart-render-{job_id}.png"
     if not render_chart_png(spec, out):
         return jsonify({"error": "Could not render chart — check labels/values"}), 400
+    # Register for the same short-lived TTL cleanup as other job files
+    job = {
+        "id": job_id,
+        "status": "done",
+        "step": "Chart render ready",
+        "created": time.time(),
+        "file_path": str(out),
+        "docx_path": None,
+        "download_name": f"chart-{job_id[:8]}.png",
+        "mime": "image/png",
+        "output": "png",
+        "text_out": None,
+        "error": None,
+    }
+    with _jobs_lock:
+        _jobs[job_id] = job
+        _save_job(job_id, job)
     return send_file(
         out,
         mimetype="image/png",
         as_attachment=False,
-        download_name=f"chart-{job_id}.png",
+        download_name=job["download_name"],
     )
 
 

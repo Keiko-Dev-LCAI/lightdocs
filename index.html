@@ -95,7 +95,32 @@
     font-size: 13px; color: var(--text2); font-weight: 600; line-height: 1.45;
   }
   .check-row input { width: 18px; height: 18px; min-height: 0; margin-top: 2px; flex-shrink: 0; }
-  .file-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .file-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; align-items: center; }
+  .mic-btn {
+    min-width: 48px; gap: 8px;
+  }
+  .mic-btn .mic-dot {
+    width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex-shrink: 0;
+  }
+  .mic-btn.listening {
+    border-color: var(--lc-secondary); color: #f0a3d8;
+    box-shadow: 0 0 0 2px rgba(221, 0, 172, 0.25);
+  }
+  .mic-btn.listening .mic-dot {
+    background: var(--lc-secondary);
+    animation: mic-pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes mic-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.35); opacity: 0.55; }
+  }
+  .dictation-notice {
+    font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.5; font-weight: 600;
+  }
+  .dictation-status {
+    font-size: 13px; color: #f0a3d8; font-weight: 700; margin-top: 6px; min-height: 1.2em;
+  }
+  .dictation-status:empty { display: none; }
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     min-height: 48px; padding: 12px 18px; border-radius: 12px; border: none;
@@ -289,13 +314,21 @@
 
         <div class="card grow">
           <label class="field" for="input" id="inputLabel">Paste or type notes</label>
-          <textarea id="input" placeholder="Paste messy notes, bullets, or numbers for a chart…&#10;&#10;Or take a photo of handwritten / printed notes below."></textarea>
+          <textarea id="input" placeholder="Paste messy notes, bullets, or numbers for a chart…&#10;&#10;Or take a photo of handwritten / printed notes below. Or tap the mic to dictate."></textarea>
           <div class="file-row">
+            <button class="btn btn-ghost mic-btn" id="micBtn" type="button" aria-pressed="false" title="Dictate with your voice">
+              <span class="mic-dot" aria-hidden="true"></span>
+              <span id="micLabel">Mic</span>
+            </button>
             <label class="btn btn-ghost">
               Take photo / gallery
               <input type="file" id="images" accept="image/*" capture="environment" multiple hidden>
             </label>
           </div>
+          <p class="dictation-notice" id="dictationNotice">
+            Dictation uses your browser’s built-in speech service, so your voice is processed by your browser provider — not by LightDocs. We never receive or store your audio.
+          </p>
+          <p class="dictation-status" id="dictationStatus" aria-live="polite"></p>
           <div class="thumbs" id="thumbs"></div>
           <p class="hint">Safe to background the tab after Generate — we keep a job id until the download is ready.</p>
         </div>
@@ -348,6 +381,9 @@
   const inputLabel = document.getElementById("inputLabel");
   const images = document.getElementById("images");
   const thumbs = document.getElementById("thumbs");
+  const micBtn = document.getElementById("micBtn");
+  const micLabel = document.getElementById("micLabel");
+  const dictationStatus = document.getElementById("dictationStatus");
   const generate = document.getElementById("generate");
   const status = document.getElementById("status");
   const result = document.getElementById("result");
@@ -893,6 +929,110 @@
     });
     queueAutosave();
   });
+
+  // ── Voice dictation (Web Speech API only — no audio to LightDocs) ──
+  (function setupDictation() {
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let listening = false;
+    let baseText = "";
+    let finalChunk = "";
+
+    function setDictStatus(msg) {
+      dictationStatus.textContent = msg || "";
+    }
+    function setListeningUI(on) {
+      listening = !!on;
+      micBtn.classList.toggle("listening", listening);
+      micBtn.setAttribute("aria-pressed", listening ? "true" : "false");
+      micLabel.textContent = listening ? "Listening…" : "Mic";
+    }
+    function stopListening() {
+      try { if (recognition) recognition.stop(); } catch (_) {}
+      setListeningUI(false);
+    }
+
+    if (!SpeechRec) {
+      micBtn.disabled = true;
+      micBtn.title = "Not supported in this browser";
+      micLabel.textContent = "Mic (n/a)";
+      setDictStatus("");
+      return;
+    }
+
+    recognition = new SpeechRec();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = (navigator.language || "en-US");
+
+    recognition.onstart = () => {
+      setListeningUI(true);
+      setDictStatus("Listening — speak now. Tap Mic again to stop.");
+    };
+    recognition.onend = () => {
+      setListeningUI(false);
+      if (dictationStatus.textContent.indexOf("permission") === -1 &&
+          dictationStatus.textContent.indexOf("blocked") === -1) {
+        setDictStatus("");
+      }
+      queueAutosave();
+    };
+    recognition.onerror = (ev) => {
+      const err = (ev && ev.error) || "";
+      setListeningUI(false);
+      if (err === "not-allowed" || err === "service-not-allowed") {
+        setDictStatus("Microphone permission denied — you can still type normally.");
+      } else if (err === "no-speech") {
+        setDictStatus("No speech heard — tap Mic to try again.");
+      } else if (err === "aborted") {
+        setDictStatus("");
+      } else {
+        setDictStatus("Dictation stopped (" + err + "). Typing still works.");
+      }
+    };
+    recognition.onresult = (ev) => {
+      let interim = "";
+      let newlyFinal = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i];
+        const t = (res[0] && res[0].transcript) || "";
+        if (res.isFinal) newlyFinal += t;
+        else interim += t;
+      }
+      if (newlyFinal) {
+        const piece = newlyFinal.trim();
+        if (piece) {
+          finalChunk = finalChunk
+            ? (finalChunk + (/\s$/.test(finalChunk) ? "" : " ") + piece)
+            : piece;
+        }
+      }
+      const spoken = [finalChunk, interim.trim()].filter(Boolean).join(" ").trim();
+      const prefix = baseText;
+      if (!spoken) input.value = prefix;
+      else if (!prefix) input.value = spoken;
+      else if (/\s$/.test(prefix)) input.value = prefix + spoken;
+      else input.value = prefix + " " + spoken;
+      queueAutosave();
+    };
+
+    micBtn.addEventListener("click", () => {
+      if (listening) {
+        stopListening();
+        setDictStatus("Dictation stopped.");
+        return;
+      }
+      baseText = input.value || "";
+      finalChunk = "";
+      try {
+        recognition.lang = navigator.language || "en-US";
+        recognition.start();
+      } catch (e) {
+        setListeningUI(false);
+        setDictStatus("Could not start dictation — try again, or keep typing.");
+      }
+    });
+  })();
 
   async function pollJob(jobId) {
     const r = await fetch(API + "/api/jobs/" + encodeURIComponent(jobId));

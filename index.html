@@ -274,7 +274,7 @@
   }
   .editor-shell {
     flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; min-height: 220px;
-    position: relative;
+    position: relative; min-height: 0;
   }
   .editor-toolbar {
     display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex-shrink: 0;
@@ -366,15 +366,18 @@
   .doc-image-handle.ne { top: 0; right: 0; cursor: nesw-resize; }
   .doc-image-handle.sw { bottom: 0; left: 0; cursor: nesw-resize; }
   .doc-image-handle.se { bottom: 0; right: 0; cursor: nwse-resize; }
-  .phone-img-controls {
+  .obj-controls {
     display: none; flex-wrap: wrap; gap: 8px; align-items: center;
     padding: 8px; background: #12132a; border: 1px solid var(--border); border-radius: 10px;
+    flex-shrink: 0;
   }
-  .phone-img-controls.show { display: flex; }
-  .phone-img-controls label { font-size: 12px; color: var(--text2); font-weight: 700; }
-  .phone-img-controls select, .phone-img-controls input[type="range"] {
+  .obj-controls.show { display: flex; }
+  .obj-controls label { font-size: 12px; color: var(--text2); font-weight: 700; }
+  .obj-controls select, .obj-controls input[type="range"] {
     min-height: 40px; width: auto; flex: 1; min-width: 100px;
   }
+  #editorHint { flex-shrink: 0; }
+  #jobHint { flex-shrink: 0; }
   @media (max-width: 719px) {
     .doc-image-handles { display: none !important; }
   }
@@ -491,6 +494,13 @@
           </div>
           <div class="draft-list" id="draftList" style="margin-top:10px"></div>
           <p class="hint">Auto-saves while you type (same device/browser only).</p>
+          <label class="field" style="margin-top:12px">My charts</label>
+          <p class="hint" style="margin-top:0">Saved on this device only — same as drafts. Phase 1: create &amp; keep; insert-into-doc comes later.</p>
+          <div class="file-row" style="margin-top:6px">
+            <button class="btn btn-ghost btn-sm" id="saveChartBtn" type="button" disabled>Save last chart</button>
+            <button class="btn btn-ghost btn-sm" id="refreshChartsBtn" type="button">Refresh</button>
+          </div>
+          <div class="draft-list" id="chartList" style="margin-top:8px"></div>
         </div>
       </div>
 
@@ -509,6 +519,7 @@
                   <option value="study">Study guide / lesson outline</option>
                   <option value="sheet">Spreadsheet</option>
                   <option value="deck">Presentation</option>
+                  <option value="chart">Chart</option>
                 </optgroup>
                 <optgroup label="Analyze">
                   <option value="explain">Scan &amp; explain a document</option>
@@ -662,7 +673,7 @@
               <button type="button" class="btn btn-ghost btn-sm" id="insertChartBtn">Add chart</button>
               <input type="file" id="editorImageFile" accept="image/*" hidden aria-label="Upload image for editor">
             </div>
-            <div class="phone-img-controls" id="phoneImgControls">
+            <div class="obj-controls" id="objControls" aria-label="Selected object controls">
               <label for="imgSizeRange">Size</label>
               <input type="range" id="imgSizeRange" min="100" max="560" value="320">
               <label for="imgWrapSelect">Wrap</label>
@@ -679,7 +690,7 @@
               <input type="color" id="imgRecolor" value="#5B4BFF" aria-label="Recolor selected chart">
             </div>
             <div class="editor-canvas" id="editorCanvas"></div>
-            <p class="hint">Edit text and place charts/images. Download rebuilds a real Word file from this layout.</p>
+            <p class="hint" id="editorHint">Edit text and place charts/images. Download rebuilds a real Word file from this layout.</p>
           </div>
           <div class="result hidden" id="result" aria-live="polite">Result text shows here for Copy. Download delivers the real file.</div>
           <div class="actions">
@@ -773,6 +784,8 @@
   const DRAFT_DB = "lightdocs_drafts_v1";
   const DRAFT_STORE = "projects";
   const AUTOSAVE_ID = "autosave";
+  const CHART_DB = "lightdocs_charts_v1";
+  const CHART_STORE = "charts";
   const DEVICE_KEY = "lightdocs_device_id_v1";
   const WALLET_KEY = "lightdocs_wallet_v1";
   const PALETTES = {
@@ -821,13 +834,15 @@
   const insertChartBtn = document.getElementById("insertChartBtn");
   const editorImageFile = document.getElementById("editorImageFile");
   const editorExpandBtn = document.getElementById("editorExpandBtn");
-  const phoneImgControls = document.getElementById("phoneImgControls");
+  const objControls = document.getElementById("objControls");
+  const phoneImgControls = objControls; // alias for any leftover refs
   const imgSizeRange = document.getElementById("imgSizeRange");
   const imgWrapSelect = document.getElementById("imgWrapSelect");
   const imgMoveUpBtn = document.getElementById("imgMoveUpBtn");
   const imgMoveDownBtn = document.getElementById("imgMoveDownBtn");
   const imgDeleteBtn = document.getElementById("imgDeleteBtn");
   const imgRecolor = document.getElementById("imgRecolor");
+  const editorHint = document.getElementById("editorHint");
   const fmtBold = document.getElementById("fmtBold");
   const fmtItalic = document.getElementById("fmtItalic");
   const fmtUnderline = document.getElementById("fmtUnderline");
@@ -1004,14 +1019,24 @@
   });
 
   function syncPhoneImgControls(sel) {
-    const phone = window.matchMedia && window.matchMedia("(max-width: 719px)").matches;
-    if (!sel || !phone) {
-      phoneImgControls.classList.remove("show");
+    if (!objControls) return;
+    if (!sel) {
+      objControls.classList.remove("show");
       return;
     }
-    phoneImgControls.classList.add("show");
-    imgSizeRange.value = String(sel.width || 320);
-    imgWrapSelect.value = sel.wrap || "full";
+    objControls.classList.add("show");
+    if (imgSizeRange) imgSizeRange.value = String(sel.width || 320);
+    if (imgWrapSelect) imgWrapSelect.value = sel.wrap || "full";
+    if (imgRecolor && Array.isArray(sel.colors) && sel.colors[0]) {
+      imgRecolor.value = sel.colors[0];
+    }
+  }
+
+  function syncEditorHints() {
+    // Avoid overlapping editor hint + jobHint in the flex column
+    if (!editorHint || !jobHint) return;
+    const hasJob = !!(jobHint.textContent || "").trim();
+    editorHint.style.display = hasJob ? "none" : "";
   }
 
   async function ensureMarkdownItLib() {
@@ -1497,6 +1522,24 @@
     result.textContent = lastText || "(empty)";
     const fmt = lastOutput || "docx";
     try {
+      if (fmt === "png") {
+        const src = lastChartThumb || chartPngDataUrls[0] || "";
+        if (src || lastDownloadUrl) {
+          const img = document.createElement("img");
+          img.src = src || lastDownloadUrl;
+          img.alt = "Generated chart";
+          img.style.maxWidth = "100%";
+          img.style.height = "auto";
+          img.style.display = "block";
+          img.style.margin = "0 auto";
+          img.style.background = "#fff";
+          img.style.borderRadius = "8px";
+          preview.appendChild(img);
+          return;
+        }
+        showRawFallback("Chart image not available — try Generate again.");
+        return;
+      }
       if (fmt === "pdf") {
         // Dormant until PDF output ships (hook registered; do not fetch PDF.js yet)
         await ensurePdfJs();
@@ -1565,6 +1608,7 @@
     study: "Paste topic or class notes → study guide with key terms + review Qs.",
     sheet: "Describe columns / data → real spreadsheet (.xlsx).",
     deck: "Paste an outline → real PowerPoint slides.",
+    chart: "Enter labels + numbers (or 43, 54, 23) → a standalone chart. Save it to My charts on this device.",
     explain: "Upload/photo or paste a doc → plain-language explanation.",
     rewrite: "Paste text → rewrite / simplify / translate in the chosen voice.",
     condition: "Photos + notes → move-in / condition report.",
@@ -1580,9 +1624,16 @@
   };
 
   function syncChartTypeUI() {
-    const on = !!wantChart.checked;
+    const chartMode = modeEl.value === "chart";
+    const on = !!wantChart.checked || chartMode;
     chartTypeWrap.hidden = !on;
     wantChart.setAttribute("aria-expanded", on ? "true" : "false");
+    if (chartMode) {
+      wantChart.checked = true;
+      wantChart.disabled = true;
+    } else {
+      wantChart.disabled = false;
+    }
   }
   wantChart.addEventListener("change", () => { syncChartTypeUI(); queueAutosave(); });
   chartType.addEventListener("change", () => queueAutosave());
@@ -1607,11 +1658,18 @@
     } else if (m === "deck") {
       inputLabel.textContent = "Paste or type notes";
       if (!userTouchedOut) outfmt.value = "pptx";
+    } else if (m === "chart") {
+      inputLabel.textContent = "Numbers / labels for the chart";
+      if (!userTouchedOut) outfmt.value = "docx";
+      wantChart.checked = true;
     } else {
       inputLabel.textContent = "Paste or type notes";
       if (!userTouchedOut) outfmt.value = (m === "explain" || m === "rewrite") ? "md" : "docx";
     }
-    outHint.textContent = OUT_HINTS[outfmt.value] || "";
+    syncChartTypeUI();
+    outHint.textContent = (m === "chart")
+      ? "Chart mode renders a standalone PNG (type + colors below). Save it to My charts on this device."
+      : (OUT_HINTS[outfmt.value] || "");
   }
   modeEl.addEventListener("change", () => { applyModeDefaults(); queueAutosave(); });
   styleEl.addEventListener("change", () => { userTouchedStyle = true; });
@@ -1673,6 +1731,147 @@
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+  }
+
+  // ── IndexedDB chart library (device-local, phase 1) ───────────────
+  function openChartDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(CHART_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(CHART_STORE)) {
+          db.createObjectStore(CHART_STORE, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function chartPut(rec) {
+    const db = await openChartDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(CHART_STORE, "readwrite");
+      tx.objectStore(CHART_STORE).put(rec);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function chartGetAll() {
+    const db = await openChartDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(CHART_STORE, "readonly");
+      const req = tx.objectStore(CHART_STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function chartDelete(id) {
+    const db = await openChartDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(CHART_STORE, "readwrite");
+      tx.objectStore(CHART_STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  const chartList = document.getElementById("chartList");
+  const saveChartBtn = document.getElementById("saveChartBtn");
+  const refreshChartsBtn = document.getElementById("refreshChartsBtn");
+  let lastChartSpec = null;
+  let lastChartThumb = null;
+
+  async function renderCharts() {
+    if (!chartList) return;
+    const all = await chartGetAll();
+    all.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    chartList.innerHTML = "";
+    if (!all.length) {
+      chartList.innerHTML = '<p class="hint">No saved charts on this device yet.</p>';
+      return;
+    }
+    all.forEach((c) => {
+      const el = document.createElement("div");
+      el.className = "draft-item";
+      const thumb = document.createElement("img");
+      thumb.src = c.thumbDataUrl || "";
+      thumb.alt = c.name || "chart";
+      thumb.style.width = "100%";
+      thumb.style.maxHeight = "80px";
+      thumb.style.objectFit = "contain";
+      thumb.style.background = "#fff";
+      thumb.style.borderRadius = "8px";
+      thumb.style.marginBottom = "6px";
+      const strong = document.createElement("strong");
+      strong.textContent = c.name || "Untitled chart";
+      const meta = document.createElement("div");
+      meta.className = "draft-meta";
+      meta.textContent = (c.spec && c.spec.type ? c.spec.type : "chart") +
+        (c.updatedAt ? (" · " + new Date(c.updatedAt).toLocaleString()) : "");
+      const actions = document.createElement("div");
+      actions.className = "draft-actions";
+      const openBtn = document.createElement("button");
+      openBtn.className = "btn btn-ghost btn-sm";
+      openBtn.type = "button";
+      openBtn.textContent = "Open";
+      openBtn.onclick = () => {
+        if (c.spec) {
+          input.value = (c.spec.labels || []).map((lab, i) => lab + " " + (c.spec.values || [])[i]).join("\n")
+            || ((c.spec.values || []).join(", "));
+          modeEl.value = "chart";
+          if (c.spec.type) chartType.value = c.spec.type;
+          if (Array.isArray(c.spec.colors) && c.spec.colors.length) {
+            chartColors = c.spec.colors.slice();
+          }
+          applyModeDefaults();
+          setStatus("ok", "Chart loaded into inputs (this device). Generate to re-render.");
+        }
+      };
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn btn-ghost btn-sm";
+      delBtn.type = "button";
+      delBtn.textContent = "Delete";
+      delBtn.onclick = async () => {
+        if (!confirm("Delete this chart from this device?")) return;
+        await chartDelete(c.id);
+        renderCharts();
+      };
+      actions.append(openBtn, delBtn);
+      el.append(thumb, strong, meta, actions);
+      chartList.appendChild(el);
+    });
+  }
+
+  function enableSaveChart(on) {
+    if (saveChartBtn) saveChartBtn.disabled = !on;
+  }
+
+  if (saveChartBtn) {
+    saveChartBtn.addEventListener("click", async () => {
+      if (!lastChartSpec) {
+        setStatus("err", "Generate a chart first, then save it on this device.");
+        return;
+      }
+      const name = (prompt("Name this chart (saved on this device only):", lastChartSpec.title || "My chart") || "").trim();
+      if (!name) return;
+      const rec = {
+        id: "chart_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7),
+        name: name,
+        spec: lastChartSpec,
+        thumbDataUrl: lastChartThumb || chartPngDataUrls[0] || "",
+        updatedAt: Date.now()
+      };
+      try {
+        await chartPut(rec);
+        await renderCharts();
+        setStatus("ok", "Chart saved on this device only — nothing uploaded.");
+      } catch (e) {
+        setStatus("err", "Could not save chart: " + (e.message || e));
+      }
+    });
+  }
+  if (refreshChartsBtn) {
+    refreshChartsBtn.addEventListener("click", () => renderCharts());
   }
 
   async function filesToStored(files) {
@@ -1972,7 +2171,19 @@
   function clearPoll() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
-  function applyDone(data) {
+  async function urlToDataUrl(url) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("fetch " + resp.status);
+    const blob = await resp.blob();
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  }
+
+  async function applyDone(data) {
     lastText = data.text || "";
     lastOutput = data.output || outfmt.value || "docx";
     lastDownloadUrl = data.download_url
@@ -1984,30 +2195,67 @@
       try { docEditor.destroy(); } catch (_) {}
       docEditor = null;
     }
+    // Device-local chart library: keep spec + thumb in memory only until user hits Save
+    lastChartSpec = (data.chart_spec && typeof data.chart_spec === "object") ? data.chart_spec : null;
+    lastChartThumb = null;
+    enableSaveChart(false);
     setStatus("ok", data.step || "Done — download ready.");
     jobHint.textContent = data.job_id
       ? ("Job " + data.job_id.slice(0, 8) + "… · drafts stay on this device only")
       : "";
+    syncEditorHints();
     localStorage.removeItem(JOB_KEY);
     setBusy(false);
     setViewMode("preview");
-    renderPreview();
-    if (lastOutput === "docx" && lastDownloadUrl) {
-      extractChartPngsFromDocx(lastDownloadUrl);
+
+    if (lastOutput === "png" && lastDownloadUrl) {
+      try {
+        const dataUrl = await urlToDataUrl(lastDownloadUrl);
+        lastChartThumb = dataUrl;
+        chartPngDataUrls = [dataUrl];
+        if (!lastChartSpec) {
+          // Fallback: try parse text as JSON chart spec
+          try {
+            const parsed = JSON.parse(lastText || "");
+            if (parsed && typeof parsed === "object" && (parsed.values || parsed.labels)) {
+              lastChartSpec = parsed;
+            }
+          } catch (_) {}
+        }
+        enableSaveChart(!!lastChartSpec);
+      } catch (e) {
+        console.warn("[lightdocs] chart thumb", e);
+        chartPngDataUrls = [];
+      }
+      await renderPreview();
+    } else if (lastOutput === "docx" && lastDownloadUrl) {
+      await renderPreview();
+      await extractChartPngsFromDocx(lastDownloadUrl);
+      if (lastChartSpec && chartPngDataUrls[0]) {
+        lastChartThumb = chartPngDataUrls[0];
+        enableSaveChart(true);
+      } else if (chartPngDataUrls[0]) {
+        lastChartThumb = chartPngDataUrls[0];
+        // Spec may still be present from want_chart jobs
+        enableSaveChart(!!lastChartSpec);
+      }
     } else {
       chartPngDataUrls = [];
+      if (lastChartSpec) enableSaveChart(true);
+      await renderPreview();
     }
     queueAutosave();
   }
   function startPolling(jobId) {
     localStorage.setItem(JOB_KEY, jobId);
     jobHint.textContent = "Job " + jobId.slice(0, 8) + "… — safe to background this tab.";
+    syncEditorHints();
     clearPoll();
     pollTimer = setInterval(async () => {
       try {
         const data = await pollJob(jobId);
         setStatus("busy", data.step || data.status);
-        if (data.status === "done") { clearPoll(); applyDone(data); }
+        if (data.status === "done") { clearPoll(); await applyDone(data); }
         else if (data.status === "error") {
           clearPoll(); localStorage.removeItem(JOB_KEY);
           setStatus("err", data.error || "Generation failed"); setBusy(false);
@@ -2021,6 +2269,7 @@
 
   (async function boot() {
     await renderDrafts();
+    try { await renderCharts(); } catch (_) {}
     // restore autosave if empty
     try {
       const all = await idbGetAll();
@@ -2045,7 +2294,7 @@
     setStatus("busy", "Resuming job…");
     try {
       const data = await pollJob(jobId);
-      if (data.status === "done") applyDone(data);
+      if (data.status === "done") await applyDone(data);
       else if (data.status === "error") {
         localStorage.removeItem(JOB_KEY);
         setStatus("err", data.error || "Previous job failed");
@@ -2068,6 +2317,8 @@
       return;
     }
     lastText = ""; lastDownloadUrl = ""; lastOutput = outfmt.value;
+    lastChartSpec = null; lastChartThumb = null; chartPngDataUrls = [];
+    enableSaveChart(false);
     result.textContent = "";
     preview.innerHTML = '<p class="preview-fallback">Generating… preview will appear when ready.</p>';
     setViewMode("preview");
@@ -2081,7 +2332,7 @@
       fd.append("text", text);
       fd.append("prop_type", propType.value);
       fd.append("forum_wrap", forumWrap.checked ? "1" : "0");
-      fd.append("want_chart", wantChart.checked ? "1" : "0");
+      fd.append("want_chart", (wantChart.checked || modeEl.value === "chart") ? "1" : "0");
       fd.append("chart_type", chartType.value || "auto");
       fd.append("chart_colors", JSON.stringify(chartColors || []));
       fd.append("device_id", deviceId);

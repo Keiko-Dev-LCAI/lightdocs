@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 
 VALID_MODES = frozenset(
     {
@@ -37,6 +37,7 @@ VALID_MODES = frozenset(
         "study",
         "sheet",
         "deck",
+        "chart",
         "explain",
         "rewrite",
         "condition",
@@ -460,6 +461,10 @@ MODE_TASKS: dict[str, str] = {
     "sheet": (
         "Shape INPUT as spreadsheet data: infer sensible columns and rows from the notes. "
         "Prefer real numbers/labels from INPUT; do not invent metrics."
+    ),
+    "chart": (
+        "INPUT is chart data only. Extract labels and numeric values. Do not write prose "
+        "essays. Prefer a short Values list; the server renders the chart image."
     ),
     "deck": (
         "Turn INPUT into a short presentation outline: 5–10 slides with titles and "
@@ -928,20 +933,22 @@ def process_job(
         chart_type = str(extras.get("chart_type") or "auto").lower()
         if chart_type not in ("auto", "bar", "line", "pie"):
             chart_type = "auto"
+        # Chart mode is always a chart-first path
+        want_chart = bool(extras.get("want_chart")) or mode == "chart"
 
         # Bare numeric input: never trust model prose (it hallucinates on trivial input).
         # Build the doc (and optional chart) deterministically from the user's own numbers.
         _numeric = try_parse_numeric_series(combined, chart_type)
         if _numeric:
             md = _simple_doc_from_input(combined)
-            if extras.get("want_chart"):
+            if want_chart:
                 cols = extras.get("chart_colors")
                 if isinstance(cols, list) and cols:
                     _numeric["colors"] = cols
                 meta["charts"] = [_numeric]
             else:
                 meta["charts"] = []
-        elif extras.get("want_chart"):
+        elif want_chart:
             # Non-numeric prose + chart requested: keep model md; fill chart if missing
             charts0 = meta.get("charts") if isinstance(meta.get("charts"), list) else []
             if not charts0:
@@ -961,9 +968,9 @@ def process_job(
             md = json.dumps(meta.get("slides"), indent=2)
 
         set_step("building", f"Building {output} file…")
-        # charts for docx
+        # charts for docx / chart-mode PNG
         charts = meta.get("charts") if isinstance(meta.get("charts"), list) else []
-        if output == "docx" and charts:
+        if (output == "docx" or mode == "chart") and charts:
             for i, spec in enumerate(charts[:4]):
                 if not isinstance(spec, dict):
                     continue
@@ -972,7 +979,7 @@ def process_job(
                     chart_pngs.append((str(spec.get("title") or f"Chart {i+1}"), png))
 
         chart_note = ""
-        if extras.get("want_chart"):
+        if want_chart:
             has_chart = bool(chart_pngs) or bool(charts)
             if not has_chart:
                 chart_note = "No clear numbers to chart — added the text only."
@@ -981,7 +988,14 @@ def process_job(
                 else:
                     md = "_" + chart_note + "_\n"
 
-        if output == "md":
+        # Chart mode: primary download is the PNG (phase 1)
+        if mode == "chart" and chart_pngs:
+            path = chart_pngs[0][1]
+            fname = f"lightdocs-{job_id[:8]}.png"
+            mime = "image/png"
+            output = "png"
+            text_out = md.strip() or json.dumps(charts[0] if charts else {}, indent=2)
+        elif output == "md":
             fname = f"lightdocs-{job_id[:8]}.md"
             path = DATA_DIR / fname
             path.write_text(md.strip() + "\n", encoding="utf-8")
@@ -1028,6 +1042,7 @@ def process_job(
             docx_path=str(path),  # backward compat
             mime=mime,
             output=output,
+            chart_spec=(charts[0] if charts and isinstance(charts[0], dict) else None),
             error=None,
         )
     except Exception as e:
@@ -1218,6 +1233,7 @@ def get_job(job_id: str):
             "download_name": job.get("download_name"),
             "output": job.get("output"),
             "mode": job.get("mode"),
+            "chart_spec": job.get("chart_spec") if job.get("status") == "done" else None,
             "privacy": "We don’t keep your docs — downloads expire automatically. Drafts stay on your device only.",
         }
     )

@@ -27,7 +27,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 
 VALID_MODES = frozenset(
     {
@@ -766,8 +766,31 @@ _OUTRO_START = (
 )
 
 
+def _collapse_doubled(text: str) -> str:
+    """If the relay returned the whole answer twice (streamed chunks + a final full frame),
+    the result is the document immediately followed by an exact copy of itself. Collapse it.
+    Only fires on an exact two-identical-halves match (optionally separated by blank space),
+    so a genuine document is never touched."""
+    if not text:
+        return text
+    t = text.strip()
+    n = len(t)
+    if n < 80:  # too short to confidently call a duplicate
+        return text
+    # allow up to a few whitespace chars sitting between the two copies
+    for gap in range(0, 6):
+        if (n - gap) % 2 != 0:
+            continue
+        h = (n - gap) // 2
+        first, sep, second = t[:h], t[h : h + gap], t[h + gap :]
+        if first == second and sep.strip() == "":
+            return first
+    return text
+
+
 def _strip_aivm_noise(text: str) -> str:
     """Drop AIVM chatter/telemetry and leaked prompt/instruction lines."""
+    text = _collapse_doubled(text)
     t = _TELEMETRY_RE.sub("", text or "")
     lines = []
     for ln in t.splitlines():

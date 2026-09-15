@@ -2225,17 +2225,40 @@
     }
   });
 
+  async function copyTextToClipboard(text) {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) { /* fall through to legacy path */ }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "-9999px";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
   copyBtn.addEventListener("click", async () => {
     const text = (docEditor && viewMode === "edit")
       ? docEditor.getText()
       : lastText;
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setStatus("ok", "Copied to clipboard.");
-    } catch {
-      setStatus("", "Copy failed — select the text manually.");
-    }
+    const ok = await copyTextToClipboard(text);
+    setStatus(ok ? "ok" : "err", ok ? "Copied to clipboard." : "Copy didn't go through — tap Copy again.");
   });
 
   function triggerBlobDownload(blob, name) {
@@ -2420,10 +2443,11 @@
             window.open("https://orcamail.ai", "_blank", "noopener,noreferrer");
             setStatus("ok", "Saved — opening OrcaMail. Attach the file there.");
             break;
-          case "copy":
-            await navigator.clipboard.writeText(docEditor ? docEditor.getText() : (lastText || ""));
-            setStatus("ok", "Text copied.");
+          case "copy": {
+            const ok = await copyTextToClipboard(docEditor ? docEditor.getText() : (lastText || ""));
+            setStatus(ok ? "ok" : "err", ok ? "Text copied." : "Copy didn't go through — try again.");
             break;
+          }
           case "download":
           default:
             triggerBlobDownload(out.blob, out.name);

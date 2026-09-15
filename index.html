@@ -214,6 +214,13 @@
     flex: 1; min-width: 0; padding: 10px 12px; border-radius: 8px;
     border: 1px solid var(--purple); background: var(--bg); color: var(--text); font-size: 14px;
   }
+  .follow-answers { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .follow-answers.hidden { display: none; }
+  .qa-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--card); }
+  .qa-q { font-size: 13px; font-weight: 700; color: var(--purple); margin: 0 0 6px; }
+  .qa-a { font-size: 14px; color: var(--text); }
+  .qa-a p, .qa-a li { margin: 0.3em 0; }
+  .qa-actions { margin-top: 8px; }
   .status {
     font-size: 13px; font-weight: 600; color: var(--text2); padding: 8px 10px; border-radius: 10px;
     background: rgba(255,255,255,0.04); border: 1px solid var(--border); line-height: 1.35;
@@ -729,7 +736,7 @@
             <button class="btn btn-ghost" id="sendBtn" type="button" disabled title="Send / share — file stays on your device">Send</button>
           </div>
           <div class="followup hidden" id="followBar">
-            <p class="followup-title">Ask about this or change it</p>
+            <p class="followup-title">Ask about this — the answer appears below and your document stays put</p>
             <div class="follow-chips">
               <button type="button" class="btn btn-ghost btn-sm" id="followSimpler">Explain simpler</button>
               <button type="button" class="btn btn-ghost btn-sm" id="followShorter">Shorter</button>
@@ -739,6 +746,7 @@
               <button type="button" class="btn btn-accent btn-sm" id="followAsk">Ask</button>
             </div>
           </div>
+          <div class="follow-answers hidden" id="followAnswers" aria-live="polite"></div>
           <p class="hint" id="jobHint"></p>
         </div>
       </div>
@@ -842,6 +850,7 @@
 (function () {
   const API = (window.LIGHTDOCS_API || "").replace(/\/$/, "");
   const JOB_KEY = "lightdocs_v1_job";
+  const FOLLOW_KEY = "lightdocs_v1_followq";
   const DRAFT_DB = "lightdocs_drafts_v1";
   const DRAFT_STORE = "projects";
   const AUTOSAVE_ID = "autosave";
@@ -882,6 +891,7 @@
   const viewEditBtn = document.getElementById("viewEditBtn");
   const viewRawBtn = document.getElementById("viewRawBtn");
   const followBar = document.getElementById("followBar");
+  const followAnswers = document.getElementById("followAnswers");
   const followInput = document.getElementById("followInput");
   const followAsk = document.getElementById("followAsk");
   const followSimpler = document.getElementById("followSimpler");
@@ -1877,6 +1887,8 @@
     if (preview) preview.innerHTML = '<p class="preview-fallback">Preview shows here after Generate. Raw text still powers Copy.</p>';
     if (docEditor) { try { docEditor.destroy(); } catch (_) {} docEditor = null; }
     if (followBar) followBar.classList.add("hidden");
+    if (followAnswers) { followAnswers.innerHTML = ""; followAnswers.classList.add("hidden"); }
+    localStorage.removeItem(FOLLOW_KEY);
     setViewMode("preview");
     syncEditorHints();
     setBusy(false);
@@ -2047,8 +2059,53 @@
   function clearPoll() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
+  async function applyFollowupDone(data, question) {
+    const answer = (data && data.text) || "";
+    localStorage.removeItem(JOB_KEY);
+    localStorage.removeItem(FOLLOW_KEY);
+    if (followAnswers) {
+      followAnswers.classList.remove("hidden");
+      const card = document.createElement("div");
+      card.className = "qa-card";
+      const q = document.createElement("p");
+      q.className = "qa-q";
+      q.textContent = "Q: " + (question || "").trim();
+      const a = document.createElement("div");
+      a.className = "qa-a";
+      try {
+        const md = await ensureMarkdownIt();
+        a.innerHTML = md.render(answer) || "(no answer)";
+      } catch (_) {
+        a.textContent = answer || "(no answer)";
+      }
+      const actions = document.createElement("div");
+      actions.className = "qa-actions";
+      const copyA = document.createElement("button");
+      copyA.type = "button";
+      copyA.className = "btn btn-ghost btn-sm";
+      copyA.textContent = "Copy answer";
+      copyA.addEventListener("click", async () => {
+        const ok = await copyTextToClipboard(answer);
+        setStatus(ok ? "ok" : "err", ok ? "Answer copied." : "Copy didn't go through — try again.");
+      });
+      actions.appendChild(copyA);
+      card.appendChild(q);
+      card.appendChild(a);
+      card.appendChild(actions);
+      followAnswers.appendChild(card);
+      card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    setStatus("ok", "Answer added below — your document is unchanged.");
+    jobHint.textContent = "";
+    if (followInput) followInput.value = "";
+    if (followBar) followBar.classList.remove("hidden");
+    setBusy(false);
+  }
+
   async function applyDone(data) {
     lastText = data.text || "";
+    if (followAnswers) { followAnswers.innerHTML = ""; followAnswers.classList.add("hidden"); }
+    localStorage.removeItem(FOLLOW_KEY);
     lastOutput = data.output || outfmt.value || "docx";
     lastDownloadUrl = data.download_url
       ? (data.download_url.startsWith("http") ? data.download_url : API + data.download_url)
@@ -2077,14 +2134,23 @@
       try {
         const data = await pollJob(jobId);
         setStatus("busy", data.step || data.status);
-        if (data.status === "done") { clearPoll(); await applyDone(data); }
+        if (data.status === "done") {
+          clearPoll();
+          const followQ = localStorage.getItem(FOLLOW_KEY);
+          if (followQ) { await applyFollowupDone(data, followQ); }
+          else { await applyDone(data); }
+        }
         else if (data.status === "error") {
           clearPoll(); localStorage.removeItem(JOB_KEY);
+          localStorage.removeItem(FOLLOW_KEY);
           setStatus("err", data.error || "Generation failed"); setBusy(false);
+          if (followBar && lastText) followBar.classList.remove("hidden");
         }
       } catch (e) {
         clearPoll(); localStorage.removeItem(JOB_KEY);
+        localStorage.removeItem(FOLLOW_KEY);
         setStatus("err", e.message || String(e)); setBusy(false);
+        if (followBar && lastText) followBar.classList.remove("hidden");
       }
     }, 3000);
   }
@@ -2114,9 +2180,14 @@
     setStatus("busy", "Resuming job…");
     try {
       const data = await pollJob(jobId);
-      if (data.status === "done") await applyDone(data);
+      if (data.status === "done") {
+        const followQ = localStorage.getItem(FOLLOW_KEY);
+        if (followQ) { await applyFollowupDone(data, followQ); }
+        else { await applyDone(data); }
+      }
       else if (data.status === "error") {
         localStorage.removeItem(JOB_KEY);
+        localStorage.removeItem(FOLLOW_KEY);
         setStatus("err", data.error || "Previous job failed");
         setBusy(false);
       } else {
@@ -2125,6 +2196,7 @@
       }
     } catch (_) {
       localStorage.removeItem(JOB_KEY);
+      localStorage.removeItem(FOLLOW_KEY);
       setBusy(false);
     }
   })();
@@ -2158,11 +2230,14 @@
       if (!r.ok) throw new Error(data.error || "Could not start follow-up");
       if (followInput) followInput.value = "";
       setStatus("busy", "generating… AIVM may take 1–2 minutes.");
+      localStorage.setItem(FOLLOW_KEY, ask);
       startPolling(data.job_id);
       refreshPayConfig();
     } catch (e) {
+      localStorage.removeItem(FOLLOW_KEY);
       setStatus("err", e.message || String(e));
       setBusy(false);
+      if (followBar && lastText) followBar.classList.remove("hidden");
     }
   }
 
@@ -2183,6 +2258,8 @@
       return;
     }
     if (followBar) followBar.classList.add("hidden");
+    if (followAnswers) { followAnswers.innerHTML = ""; followAnswers.classList.add("hidden"); }
+    localStorage.removeItem(FOLLOW_KEY);
     lastText = ""; lastDownloadUrl = ""; lastOutput = outfmt.value;
     result.textContent = "";
     preview.innerHTML = '<p class="preview-fallback">Generating… preview will appear when ready.</p>';

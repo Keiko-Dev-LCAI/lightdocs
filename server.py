@@ -24,7 +24,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.7.4"
+VERSION = "0.7.5"
 
 VALID_MODES = frozenset(
     {
@@ -300,8 +300,36 @@ _LEAK_LINE_RES = [
         r"^here is the (formatted|plain|final)",
         r"^here'?s the (formatted|plain|final)",
         r"^here is your (document|answer|explanation|markdown)",
+        r"^congratulations\b",
+        r"^congrats\b",
+        r"^let'?s go through\b",
+        r"^let'?s (take a look|walk through|explore|review)\b",
+        r"^now you (have|know)\b",
+        r"^you now (have|know)\b",
+        r"^that'?s (it|all|everything)\b",
+        r"^there you (go|have it)\b",
+        r"^great (job|work|choice)\b",
+        r"^well done\b",
+        r"^happy \w+ing\b",
     )
 ]
+
+_READER_CHATTER_RE = re.compile(r"\b(you|your|you'?ve|you'?re|let'?s|we'?ll)\b", re.I)
+_INTRO_START = ("congratulations", "congrats", "welcome", "let's ", "lets ", "great job", "well done")
+_OUTRO_START = (
+    "now you",
+    "you now",
+    "that's it",
+    "thats it",
+    "that covers",
+    "there you",
+    "i hope",
+    "hope ",
+    "feel free",
+    "in summary",
+    "as you can see",
+    "happy ",
+)
 
 
 def _strip_aivm_noise(text: str) -> str:
@@ -342,6 +370,23 @@ def _strip_aivm_noise(text: str) -> str:
         else:
             blank = 0
             out.append(ln)
+    # Drop a leading/trailing line that directly addresses the reader (a greeting/congratulation
+    # or wrap-up the relay tacks on). Wording varies, so fixed patterns miss it; only the first and
+    # last content lines are tested, to avoid touching the real document body.
+    def _content_idxs(seq):
+        return [i for i, ln in enumerate(seq) if ln.strip()]
+
+    idxs = _content_idxs(out)
+    if idxs:
+        first = out[idxs[0]].strip()
+        low = first.lower()
+        if low.startswith(_INTRO_START) or ("!" in first and _READER_CHATTER_RE.search(first)):
+            del out[idxs[0]]
+    idxs = _content_idxs(out)
+    if idxs:
+        last = out[idxs[-1]].strip().lower()
+        if last.startswith(_OUTRO_START):
+            del out[idxs[-1]]
     return "\n".join(out).strip()
 
 
@@ -623,6 +668,10 @@ yourself, or add preamble such as 'Here is the output'. Answer directly.
         "introduce yourself, never use a name for yourself (you are not 'OrcaApp' or any "
         "assistant), and never write conversational filler such as 'Welcome to...', "
         "'I'm excited to help', 'Let's break it down', or 'What can you do with this information'. "
+        "Never congratulate, praise, thank, or address the reader, and never assume the reader "
+        "wrote, built, created, set up, owns, or is deploying the material — describe the document "
+        "in the third person only. Do not open with a greeting/congratulation or close with a "
+        "wrap-up such as 'Now you have...', 'That's it', or 'Hope this helps'. "
         "Output ONLY the finished document. "
         "No preamble, no apologies, no 'here is the output', no token stats. "
     )

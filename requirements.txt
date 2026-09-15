@@ -9,3 +9,7 @@ matplotlib>=3.8,<4
 openpyxl>=3.1,<4
 python-pptx>=1.0,<2
 pypdf>=4,<6
+web3>=6.0.0
+eth-account>=0.10.0
+cryptography>=41.0.0
+websocket-client>=1.6.0

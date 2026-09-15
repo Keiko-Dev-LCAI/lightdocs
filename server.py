@@ -27,7 +27,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_NAME = "lightdocs"
-VERSION = "0.8.1"
+VERSION = "0.8.2"
 
 VALID_MODES = frozenset(
     {
@@ -767,24 +767,41 @@ _OUTRO_START = (
 
 
 def _collapse_doubled(text: str) -> str:
-    """If the relay returned the whole answer twice (streamed chunks + a final full frame),
-    the result is the document immediately followed by an exact copy of itself. Collapse it.
-    Only fires on an exact two-identical-halves match (optionally separated by blank space),
-    so a genuine document is never touched."""
+    """Collapse an answer the relay returned twice (streamed chunks + a final full frame).
+    1) exact two-identical-halves (optionally separated by whitespace); or
+    2) the document restarts: its first real line reappears near the middle and the two parts
+       are near-identical. Real documents don't repeat their opening line at their own midpoint,
+       so legitimate content is left alone."""
     if not text:
         return text
+    import difflib
     t = text.strip()
     n = len(t)
-    if n < 80:  # too short to confidently call a duplicate
+    if n < 80:
         return text
-    # allow up to a few whitespace chars sitting between the two copies
+    # 1) exact halves
     for gap in range(0, 6):
         if (n - gap) % 2 != 0:
             continue
         h = (n - gap) // 2
-        first, sep, second = t[:h], t[h : h + gap], t[h + gap :]
+        first, sep, second = t[:h], t[h:h + gap], t[h + gap:]
         if first == second and sep.strip() == "":
             return first
+    # 2) fingerprint: first non-trivial line reappears in the back half
+    head = ""
+    for ln in t.split("\n"):
+        s = ln.strip()
+        if len(s) >= 12:
+            head = s
+            break
+    if head:
+        start = max(1, int(n * 0.35))
+        idx = t.find(head, start)
+        if idx != -1:
+            first, second = t[:idx].rstrip(), t[idx:]
+            if len(first) >= n * 0.30 and len(second) >= n * 0.30:
+                if difflib.SequenceMatcher(None, first, second).ratio() >= 0.90:
+                    return first
     return text
 
 
@@ -1307,6 +1324,7 @@ def process_job(
         raw_out = aivm_infer(build_prompt(combined, style, output, mode, extras))
         if not raw_out or len(raw_out) < 4:
             raise RuntimeError("AIVM returned empty output — try again.")
+        raw_out = _collapse_doubled(raw_out)        # de-dup at the source
         md, meta = parse_lightdocs_payload(raw_out)
         if not md.strip() and output in ("docx", "md"):
             md = _strip_aivm_noise(raw_out)
@@ -1362,6 +1380,7 @@ def process_job(
             mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             text_out = md.strip()
 
+        text_out = _collapse_doubled(text_out)
         set_step(
             "done",
             "Done — download ready. We don’t keep your docs long.",

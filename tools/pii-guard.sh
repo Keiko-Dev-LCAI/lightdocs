@@ -1,140 +1,80 @@
 #!/usr/bin/env bash
 # pii-guard.sh — blocks commits containing personal/private info
 #
-# Scans STAGED content for:
-#   • personal email and username
-#   • excluded personal wallet addresses
-#   • hardcoded secret key values (not placeholders)
+# IMPORTANT: This script contains NO personal data. The patterns it matches
+# are loaded at runtime from a LOCAL, git-ignored file that never leaves the
+# machine:
+#     $PII_GUARD_PATTERNS   (default: ~/.config/pii-guard/patterns)
 #
-# Exit 1 and print file:line if anything matches. Exit 0 if clean.
+# That file holds one regex per line (blank lines and #comments ignored):
+#     <personal email>
+#     <username handle>
+#     <wallet hex without 0x>
+#     <real name>
+# Create it once with mode 600. If it is missing, the guard prints a warning
+# and does NOT block — so the guard can never itself become the leak.
 #
-# Usage (standalone test):
-#   bash tools/pii-guard.sh
+# Also blocks hardcoded secret assignments (generic patterns, not personal),
+# e.g.  PRIVATE_KEY = "long-real-looking-value".
 #
-# Installed as pre-commit hook via install-pii-guard.sh
+# Exit 1 + print file:line on a match. Exit 0 if clean.
 
 set -uo pipefail
 
-# ── Configuration ──────────────────────────────────────────────────────────
-# If you have a real name to block, set it here (case-insensitive grep).
-# Leave blank to skip the real-name check.
-REAL_NAME=""
+PATTERNS_FILE="${PII_GUARD_PATTERNS:-$HOME/.config/pii-guard/patterns}"
 
-# Personal email and username handle
-EMAIL_PATTERNS=(
-  'REDACTED@gmail\.com'
-  '\bREDACTED\b'
-)
-
-# Personal/excluded wallet addresses (matched case-insensitively)
-WALLET_PATTERNS=(
-  '69DEd8cFe0a9b5e8c00cAb7EEb058959A23D7156'
-  'a3a653a8cba0710ff57ac34e2278c603b4259fd3'
-  '1F899FaD2C8BD70b6eF356ae6cC3c0abDbB15EB5'
-  '6518fD26a7aD2Fe1bA80De5f279Ee59F55C0A9bA'
-)
-
-# Hardcoded secret patterns: assignment to a real-looking value (not a placeholder).
-# Matches lines like: ETHERSCAN_KEY = "ABC123..." or PRIVATE_KEY='0x...'
-# Skips obvious placeholders: YOUR_KEY, PASTE_HERE, <...>, example, test, dummy, xxx
+# Generic secret-assignment detector (contains NO personal data).
 SECRET_PATTERNS=(
   '(PRIVATE_KEY|SECRET_KEY|API_KEY|ETHERSCAN_KEY|APIKEY)\s*[=:]\s*["\047][A-Za-z0-9+/]{20,}'
 )
-SECRET_SKIP='(YOUR_|PASTE|PLACEHOLDER|EXAMPLE|TEST|DUMMY|<|xxx|\.\.\.|__)'
+SECRET_SKIP='(YOUR_|PASTE|PLACEHOLDER|EXAMPLE|TEST|DUMMY|<|xxx|\.\.\.|__|REPLACE_WITH)'
 
-# ── Helpers ────────────────────────────────────────────────────────────────
 FAIL=0
-RED='\033[0;31m'
-NC='\033[0m'
+RED='\033[0;31m'; YEL='\033[0;33m'; NC='\033[0m'
+flag() { echo -e "${RED}[PII-GUARD BLOCKED]${NC} $1"; FAIL=1; }
 
-flag() {
-  echo -e "${RED}[PII-GUARD BLOCKED]${NC} $1"
-  FAIL=1
-}
+# Load personal patterns from the local, git-ignored file.
+PERSONAL_PATTERNS=()
+if [[ -f "$PATTERNS_FILE" ]]; then
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    PERSONAL_PATTERNS+=("$line")
+  done < "$PATTERNS_FILE"
+else
+  echo -e "${YEL}[pii-guard] No local patterns file at ${PATTERNS_FILE} — personal-data check skipped.${NC}" >&2
+  echo -e "${YEL}[pii-guard] Create it (mode 600, one regex per line) to enable name/email/wallet blocking.${NC}" >&2
+fi
 
-# Get staged diff as text with file:line context
-# We use `git diff --cached -U0` and parse it to map to file:line.
-# For simplicity, use git diff --cached --name-only + git show :file for each.
-staged_files() {
-  git diff --cached --name-only --diff-filter=ACMR 2>/dev/null
-}
+staged_files() { git diff --cached --name-only --diff-filter=ACMR 2>/dev/null; }
 
 check_file() {
-  local path="$1"
-  # Read staged content (not working tree) via git show
-  local content
+  local path="$1" content
   content=$(git show ":${path}" 2>/dev/null) || return 0
 
-  # Email patterns
-  for pat in "${EMAIL_PATTERNS[@]}"; do
-    local hits
-    hits=$(echo "$content" | grep -nEi "$pat" 2>/dev/null || true)
+  for pat in "${PERSONAL_PATTERNS[@]:-}"; do
+    [[ -z "$pat" ]] && continue
+    local hits; hits=$(echo "$content" | grep -nEi "$pat" 2>/dev/null || true)
     if [[ -n "$hits" ]]; then
-      while IFS= read -r line; do
-        flag "${path}:${line}  ← personal email/username"
-      done <<< "$hits"
+      while IFS= read -r l; do flag "${path}:${l}  <- personal info (local pattern)"; done <<< "$hits"
     fi
   done
 
-  # Real name (only if configured)
-  if [[ -n "$REAL_NAME" ]]; then
-    local hits
-    hits=$(echo "$content" | grep -nFi "$REAL_NAME" 2>/dev/null || true)
-    if [[ -n "$hits" ]]; then
-      while IFS= read -r line; do
-        flag "${path}:${line}  ← real name"
-      done <<< "$hits"
-    fi
-  fi
-
-  # Wallet addresses
-  for wallet in "${WALLET_PATTERNS[@]}"; do
-    local hits
-    hits=$(echo "$content" | grep -ni "$wallet" 2>/dev/null || true)
-    if [[ -n "$hits" ]]; then
-      while IFS= read -r line; do
-        flag "${path}:${line}  ← excluded wallet address"
-      done <<< "$hits"
-    fi
-  done
-
-  # Hardcoded secrets
   for pat in "${SECRET_PATTERNS[@]}"; do
-    local hits
-    hits=$(echo "$content" | grep -nEi "$pat" 2>/dev/null || true)
+    local hits; hits=$(echo "$content" | grep -nEi "$pat" 2>/dev/null || true)
     if [[ -n "$hits" ]]; then
-      while IFS= read -r line; do
-        # Skip if line looks like a placeholder
-        if echo "$line" | grep -qEi "$SECRET_SKIP"; then
-          continue
-        fi
-        flag "${path}:${line}  ← hardcoded secret value"
+      while IFS= read -r l; do
+        echo "$l" | grep -qEi "$SECRET_SKIP" && continue
+        flag "${path}:${l}  <- hardcoded secret value"
       done <<< "$hits"
     fi
   done
 }
 
-# ── Main ───────────────────────────────────────────────────────────────────
-# Check we're inside a git repo
-if ! git rev-parse --git-dir >/dev/null 2>&1; then
-  echo "[pii-guard] Not a git repo — nothing to check." >&2
-  exit 0
-fi
-
-files=$(staged_files)
-if [[ -z "$files" ]]; then
-  exit 0
-fi
-
-while IFS= read -r f; do
-  check_file "$f"
-done <<< "$files"
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "[pii-guard] Not a git repo." >&2; exit 0; }
+files=$(staged_files); [[ -z "$files" ]] && exit 0
+while IFS= read -r f; do check_file "$f"; done <<< "$files"
 
 if [[ $FAIL -ne 0 ]]; then
-  echo ""
-  echo "  Commit blocked. Remove the flagged content and try again."
-  echo "  If this is a known-safe value, see tools/pii-guard.sh to adjust patterns."
-  exit 1
+  echo ""; echo "  Commit blocked. Remove the flagged content and try again."; exit 1
 fi
-
 exit 0
